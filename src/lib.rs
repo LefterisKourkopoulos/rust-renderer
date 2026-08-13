@@ -257,7 +257,13 @@ pub struct State {
     diffuse_bind_group: wgpu::BindGroup,
     texture_1: texture::Texture,
     texture_2: texture::Texture,
+    depth_texture: texture::Texture,
     use_texture_1: bool,
+    depth_debug_sampler: wgpu::Sampler,
+    depth_bind_group_layout: wgpu::BindGroupLayout,
+    depth_bind_group: wgpu::BindGroup,
+    depth_debug_pipeline: wgpu::RenderPipeline,
+    show_depth_buffer: bool,
 }
 
 impl State {
@@ -363,6 +369,106 @@ impl State {
             let texture_1 = texture::Texture::from_bytes(&device, &queue, texture_1_bytes, "happy-tree.png").unwrap();
             let texture_2_bytes = include_bytes!("centrica_logo.png");
             let texture_2 = texture::Texture::from_bytes(&device, &queue, texture_2_bytes, "centrica_logo.png").unwrap();
+
+            let depth_texture = texture::Texture::create_depth_texture(&device, &config, "depth_texture");
+
+            // Depth debug view: samples the depth texture and draws it to the screen.
+            let depth_debug_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                ..Default::default()
+            });
+
+            let depth_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Depth,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+                label: Some("depth_bind_group_layout"),
+            });
+
+            let depth_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                layout: &depth_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&depth_texture.view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&depth_debug_sampler),
+                    },
+                ],
+                label: Some("depth_bind_group"),
+            });
+
+            let depth_debug_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("Depth Debug Shader"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("depth_debug.wgsl").into()),
+            });
+
+            let depth_debug_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Depth Debug Pipeline Layout"),
+                bind_group_layouts: &[Some(&depth_bind_group_layout)],
+                immediate_size: 0,
+            });
+
+            let depth_debug_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Depth Debug Pipeline"),
+                layout: Some(&depth_debug_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &depth_debug_shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &depth_debug_shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: config.format,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview_mask: None,
+                cache: None,
+            });
+
+            let show_depth_buffer = false;
 
             // Buffers
             let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -510,7 +616,13 @@ impl State {
                     polygon_mode: wgpu::PolygonMode::Fill,
                     conservative: false,
                 },
-                depth_stencil: None,
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: texture::Texture::DEPTH_FORMAT,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Less),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
                 multisample: wgpu::MultisampleState {
                     count: 1,
                     mask: !0,
@@ -543,7 +655,13 @@ impl State {
                 diffuse_bind_group,
                 texture_1,
                 texture_2,
+                depth_texture,
                 use_texture_1,
+                depth_debug_sampler,
+                depth_bind_group_layout,
+                depth_bind_group,
+                depth_debug_pipeline,
+                show_depth_buffer,
             })
     }
 
@@ -552,6 +670,21 @@ impl State {
             self.config.width = width;
             self.config.height = height;
             self.surface.configure(&self.device, &self.config);
+            self.depth_texture = texture::Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
+            self.depth_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                layout: &self.depth_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&self.depth_texture.view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&self.depth_debug_sampler),
+                    },
+                ],
+                label: Some("depth_bind_group"),
+            });
             self.is_surface_configured = true;
         }
     }
@@ -607,7 +740,14 @@ impl State {
                         },
                     })
                 ],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_texture.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
                 occlusion_query_set: None,
                 timestamp_writes: None,
                 multiview_mask: None,
@@ -621,6 +761,31 @@ impl State {
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16); 
             
             render_pass.draw_indexed(0..self.num_indices, 0, 0..self.instances.len() as _);
+        }
+
+        if self.show_depth_buffer {
+            let mut depth_debug_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Depth Debug Pass"),
+                color_attachments: &[
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        depth_slice: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })
+                ],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+                multiview_mask: None,
+            });
+
+            depth_debug_pass.set_pipeline(&self.depth_debug_pipeline);
+            depth_debug_pass.set_bind_group(0, &self.depth_bind_group, &[]);
+            depth_debug_pass.draw(0..3, 0..1);
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -668,6 +833,9 @@ impl State {
                 );
 
                 self.diffuse_bind_group = diffuse_bind_group;
+            }
+            (KeyCode::KeyF, true) => {
+                self.show_depth_buffer = !self.show_depth_buffer;
             }
             _ => {self.camera_controller.handle_key(key_code, is_pressed);}
         }
