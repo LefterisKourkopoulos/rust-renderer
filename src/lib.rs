@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use wgpu::util::DeviceExt;
 use winit::{
     application::ApplicationHandler,
     event::*,
@@ -13,6 +14,12 @@ use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use winit::platform::web::EventLoopExtWebSys;
 
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct BgColorUniform {
+    color: [f32; 4],
+}
+
 // State Struct
 pub struct State {
     surface: wgpu::Surface<'static>,
@@ -21,7 +28,10 @@ pub struct State {
     config: wgpu::SurfaceConfiguration,
     is_surface_configured: bool,
     bg_color: wgpu::Color,
+    bg_color_buffer: wgpu::Buffer,
+    bg_color_bind_group: wgpu::BindGroup,
     window: Arc<Window>,
+    render_pipeline: wgpu::RenderPipeline,
 }
 
 impl State {
@@ -91,6 +101,89 @@ impl State {
                 color_space: wgpu::SurfaceColorSpace::Auto,
             };
 
+            // Shader
+            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("Shader"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
+            });
+
+            let bg_color_uniform = BgColorUniform {
+                color: [bg_color.r as f32, bg_color.g as f32, bg_color.b as f32, bg_color.a as f32],
+            };
+
+            let bg_color_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Bg Color Buffer"),
+                contents: bytemuck::cast_slice(&[bg_color_uniform]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+
+            let bg_color_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Bg Color Bind Group Layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
+            let bg_color_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Bg Color Bind Group"),
+                layout: &bg_color_bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: bg_color_buffer.as_entire_binding(),
+                }],
+            });
+
+            let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Render Pipeline Layout"),
+                bind_group_layouts: &[Some(&bg_color_bind_group_layout)],
+                immediate_size: 0,
+            });
+            
+            let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Render Pipeline"),
+                layout: Some(&render_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: config.format,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: Some(wgpu::Face::Back),
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview_mask: None,
+                cache: None,
+            });
+
             Ok(Self {
                 surface,
                 device,
@@ -98,6 +191,9 @@ impl State {
                 config,
                 is_surface_configured: false,
                 bg_color,
+                bg_color_buffer,
+                bg_color_bind_group,
+                render_pipeline,
                 window,
             })
     }
@@ -144,22 +240,33 @@ impl State {
         });
 
         {
-            let _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    depth_slice: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(self.bg_color),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
+                color_attachments: &[
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        depth_slice: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 0.1,
+                                g: 0.2,
+                                b: 0.5,
+                                a: 1.0,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })
+                ],
                 depth_stencil_attachment: None,
                 occlusion_query_set: None,
                 timestamp_writes: None,
                 multiview_mask: None,
             });
+        
+            render_pass.set_pipeline(&self.render_pipeline);
+            render_pass.set_bind_group(0, &self.bg_color_bind_group, &[]);
+            render_pass.draw(0..3, 0..1);
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -186,6 +293,16 @@ impl State {
             b: 0.0,
             a: 1.0,
         };
+
+        let bg_color_uniform = BgColorUniform {
+            color: [
+                self.bg_color.r as f32,
+                self.bg_color.g as f32,
+                self.bg_color.b as f32,
+                self.bg_color.a as f32,
+            ],
+        };
+        self.queue.write_buffer(&self.bg_color_buffer, 0, bytemuck::cast_slice(&[bg_color_uniform]));
     }
 }
 
