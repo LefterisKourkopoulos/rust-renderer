@@ -1,3 +1,5 @@
+mod texture;
+
 use std::sync::Arc;
 
 use wgpu::util::DeviceExt;
@@ -25,7 +27,7 @@ struct BgColorUniform {
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct Vertex {
     position: [f32; 3],
-    color: [f32; 3],
+    tex_coords: [f32; 2],
 }
 
 impl Vertex {
@@ -42,7 +44,7 @@ impl Vertex {
                 wgpu::VertexAttribute {
                     offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
                     shader_location: 1,
-                    format: wgpu::VertexFormat::Float32x3,
+                    format: wgpu::VertexFormat::Float32x2,
                 }
             ]
         }
@@ -50,21 +52,21 @@ impl Vertex {
 }
 
 // -- DATA --
-// lib.rs
 const VERTICES: &[Vertex] = &[
-    Vertex { position: [-0.0868241, 0.49240386, 0.0], color: [0.0, 1.0, 0.5] }, // A
-    Vertex { position: [-0.49513406, 0.06958647, 0.0], color: [0.3, 0.7, 0.5] }, // B
-    Vertex { position: [-0.21918549, -0.44939706, 0.0], color: [0.5, 0.5, 0.5] }, // C
-    Vertex { position: [0.35966998, -0.3473291, 0.0], color: [0.7, 0.3, 0.5] }, // D
-    Vertex { position: [0.44147372, 0.2347359, 0.0], color: [1.0, 0.0, 0.5] }, // E
+    Vertex { position: [-0.0868241, 0.49240386, 0.0], tex_coords: [0.4131759, 0.00759614], }, // A
+    Vertex { position: [-0.49513406, 0.06958647, 0.0], tex_coords: [0.0048659444, 0.43041354], }, // B
+    Vertex { position: [-0.21918549, -0.44939706, 0.0], tex_coords: [0.28081453, 0.949397], }, // C
+    Vertex { position: [0.35966998, -0.3473291, 0.0], tex_coords: [0.85967, 0.84732914], }, // D
+    Vertex { position: [0.44147372, 0.2347359, 0.0], tex_coords: [0.9414737, 0.2652641], }, // E
 ];
+
+
 
 const INDICES: &[u16] = &[
     0, 1, 4,
     1, 2, 4,
     2, 3, 4,
 ];
-
 
 // State Struct
 pub struct State {
@@ -75,18 +77,23 @@ pub struct State {
     is_surface_configured: bool,
     bg_color: wgpu::Color,
     bg_color_buffer: wgpu::Buffer,
-    bg_color_bind_group: wgpu::BindGroup,
     window: Arc<Window>,
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     num_vertices: u32,
     num_indices: u32,
+    diffuse_bind_group: wgpu::BindGroup,
+    texture_1: texture::Texture,
+    texture_2: texture::Texture,
+    use_texture_1: bool,
 }
 
 impl State {
     async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
         let size = window.inner_size();
+
+        let use_texture_1 = true;
 
         let bg_color = wgpu::Color {
             r: 0.1,
@@ -154,6 +161,11 @@ impl State {
                 color_space: wgpu::SurfaceColorSpace::Auto,
             };
 
+            let texture_1_bytes = include_bytes!("happy-tree.png");
+            let texture_1 = texture::Texture::from_bytes(&device, &queue, texture_1_bytes, "happy-tree.png").unwrap();
+            let texture_2_bytes = include_bytes!("centrica_logo.png");
+            let texture_2 = texture::Texture::from_bytes(&device, &queue, texture_2_bytes, "centrica_logo.png").unwrap();
+
             // Buffers
             let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Vertex Buffer"),
@@ -185,32 +197,50 @@ impl State {
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
 
-            let bg_color_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("Bg Color Bind Group Layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+            let texture_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
                     },
-                    count: None,
-                }],
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+                label: Some("texture_bind_group_layout"),
             });
 
-            let bg_color_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("Bg Color Bind Group"),
-                layout: &bg_color_bind_group_layout,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: bg_color_buffer.as_entire_binding(),
-                }],
-            });
+            let diffuse_bind_group = device.create_bind_group(
+                &wgpu::BindGroupDescriptor {
+                    layout: &texture_bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(&texture_1.view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(&texture_1.sampler),
+                        }
+                    ],
+                    label: Some("diffuse_bind_group"),
+                }
+            );
 
+        
             let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[Some(&bg_color_bind_group_layout)],
+                bind_group_layouts: &[Some(&texture_bind_group_layout)],
                 immediate_size: 0,
             });
             
@@ -260,13 +290,16 @@ impl State {
                 is_surface_configured: false,
                 bg_color,
                 bg_color_buffer,
-                bg_color_bind_group,
                 render_pipeline,
                 vertex_buffer,
                 index_buffer,
                 window,
                 num_vertices,
                 num_indices,
+                diffuse_bind_group,
+                texture_1,
+                texture_2,
+                use_texture_1,
             })
     }
 
@@ -337,9 +370,9 @@ impl State {
             });
         
             render_pass.set_pipeline(&self.render_pipeline);
+            render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16); 
-            render_pass.set_bind_group(0, &self.bg_color_bind_group, &[]);
             
             render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
         }
@@ -354,9 +387,36 @@ impl State {
 
     }
 
-    fn handle_key(&self, event_loop: &ActiveEventLoop, key_code: KeyCode, is_pressed: bool) {
+    fn handle_key(&mut self, event_loop: &ActiveEventLoop, key_code: KeyCode, is_pressed: bool) {
         match (key_code, is_pressed) {
             (KeyCode::Escape, true) => event_loop.exit(),
+            (KeyCode::Space, true) => {
+                self.use_texture_1 = !self.use_texture_1;
+                let texture = if self.use_texture_1 {
+                    &self.texture_1
+                } else {
+                    &self.texture_2
+                };
+
+                let diffuse_bind_group = self.device.create_bind_group(
+                    &wgpu::BindGroupDescriptor {
+                        layout: &self.render_pipeline.get_bind_group_layout(0),
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(&texture.view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::Sampler(&texture.sampler),
+                            }
+                        ],
+                        label: Some("diffuse_bind_group"),
+                    }
+                );
+
+                self.diffuse_bind_group = diffuse_bind_group;
+            }
             _ => {}
         }
     }
