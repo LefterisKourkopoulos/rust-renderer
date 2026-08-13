@@ -1,6 +1,10 @@
 mod texture;
+mod model;
+mod resources;
 
 use std::sync::Arc;
+
+use model::Vertex;
 
 use wgpu::util::DeviceExt;
 use winit::{
@@ -20,15 +24,15 @@ use winit::platform::web::EventLoopExtWebSys;
 // Vertex
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct Vertex {
+struct TriangleVertex {
     position: [f32; 3],
     tex_coords: [f32; 2],
 }
 
-impl Vertex {
+impl TriangleVertex {
     fn desc() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+            array_stride: std::mem::size_of::<TriangleVertex>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &[
                 wgpu::VertexAttribute {
@@ -105,12 +109,12 @@ impl InstanceRaw {
 }
 
 // -- DATA --
-const VERTICES: &[Vertex] = &[
-    Vertex { position: [-0.0868241, 0.49240386, 0.0], tex_coords: [0.4131759, 0.00759614], }, // A
-    Vertex { position: [-0.49513406, 0.06958647, 0.0], tex_coords: [0.0048659444, 0.43041354], }, // B
-    Vertex { position: [-0.21918549, -0.44939706, 0.0], tex_coords: [0.28081453, 0.949397], }, // C
-    Vertex { position: [0.35966998, -0.3473291, 0.0], tex_coords: [0.85967, 0.84732914], }, // D
-    Vertex { position: [0.44147372, 0.2347359, 0.0], tex_coords: [0.9414737, 0.2652641], }, // E
+const VERTICES: &[TriangleVertex] = &[
+    TriangleVertex { position: [-0.0868241, 0.49240386, 0.0], tex_coords: [0.4131759, 0.00759614], }, // A
+    TriangleVertex { position: [-0.49513406, 0.06958647, 0.0], tex_coords: [0.0048659444, 0.43041354], }, // B
+    TriangleVertex { position: [-0.21918549, -0.44939706, 0.0], tex_coords: [0.28081453, 0.949397], }, // C
+    TriangleVertex { position: [0.35966998, -0.3473291, 0.0], tex_coords: [0.85967, 0.84732914], }, // D
+    TriangleVertex { position: [0.44147372, 0.2347359, 0.0], tex_coords: [0.9414737, 0.2652641], }, // E
 ];
 
 const INDICES: &[u16] = &[
@@ -264,6 +268,7 @@ pub struct State {
     depth_bind_group: wgpu::BindGroup,
     depth_debug_pipeline: wgpu::RenderPipeline,
     show_depth_buffer: bool,
+    obj_model: model::Model,
 }
 
 impl State {
@@ -341,21 +346,26 @@ impl State {
             };
             
             // Instances
+            const SPACE_BETWEEN: f32 = 3.0;
             let instances = (0..NUM_INSTANCES_PER_ROW).flat_map(|z| {
                 (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-                    let position = cgmath::Vector3 {
-                        x: x as f32 - INSTANCE_DISPLACEMENT.x,
-                        y: 0.0,
-                        z: z as f32 - INSTANCE_DISPLACEMENT.z,
-                    };
-                    let rotation = if position.is_zero() { 
+                    let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+                    let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+
+                    let position = cgmath::Vector3 { x, y: 0.0, z };
+
+                    let rotation = if position.is_zero() {
                         cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0))
                     } else {
                         cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
                     };
-                    Instance { position, rotation }
+
+                    Instance {
+                        position, rotation,
+                    }
                 })
             }).collect::<Vec<_>>();
+
 
             let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
             let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -365,9 +375,9 @@ impl State {
             });
 
             // Textures
-            let texture_1_bytes = include_bytes!("happy-tree.png");
+            let texture_1_bytes = include_bytes!("res/happy-tree.png");
             let texture_1 = texture::Texture::from_bytes(&device, &queue, texture_1_bytes, "happy-tree.png").unwrap();
-            let texture_2_bytes = include_bytes!("centrica_logo.png");
+            let texture_2_bytes = include_bytes!("res/centrica_logo.png");
             let texture_2 = texture::Texture::from_bytes(&device, &queue, texture_2_bytes, "centrica_logo.png").unwrap();
 
             let depth_texture = texture::Texture::create_depth_texture(&device, &config, "depth_texture");
@@ -578,6 +588,11 @@ impl State {
                 label: Some("camera_bind_group"),
             });
 
+            let obj_model =
+                resources::load_model("cube.obj", &device, &queue, &texture_bind_group_layout)
+                    .await
+                    .unwrap();
+
             // Render Pipeline        
             let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
@@ -594,7 +609,7 @@ impl State {
                 vertex: wgpu::VertexState {
                     module: &shader,
                     entry_point: Some("vs_main"),
-                    buffers: &[Some(Vertex::desc()), Some(InstanceRaw::desc())],
+                    buffers: &[Some(model::ModelVertex::desc()), Some(InstanceRaw::desc())],
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                 },
                 fragment: Some(wgpu::FragmentState {
@@ -662,6 +677,7 @@ impl State {
                 depth_bind_group,
                 depth_debug_pipeline,
                 show_depth_buffer,
+                obj_model,
             })
     }
 
@@ -753,14 +769,14 @@ impl State {
                 multiview_mask: None,
             });
         
-            render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
-            render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16); 
-            
-            render_pass.draw_indexed(0..self.num_indices, 0, 0..self.instances.len() as _);
+
+            render_pass.set_pipeline(&self.render_pipeline);
+
+            use model::DrawModel;
+            let mesh = &self.obj_model.meshes[0];
+            let material = &self.obj_model.materials[mesh.material];
+            render_pass.draw_mesh_instanced(mesh, material, 0..self.instances.len() as u32, &self.camera_bind_group);
         }
 
         if self.show_depth_buffer {
