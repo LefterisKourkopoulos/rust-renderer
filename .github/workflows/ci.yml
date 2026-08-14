@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# Cancel superseded runs on the same ref. `github.head_ref` is only set for
+# pull_request events, so fall back to `github.ref` for pushes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Backtraces on a panicking build script are worth the zero cost here.
+  RUST_BACKTRACE: 1
+
+jobs:
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # rustfmt is not in the default toolchain, so request it explicitly.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      # No rust-cache here: rustfmt does not compile anything, so there are no
+      # artifacts worth restoring.
+      - run: cargo fmt --all --check
+
+  native:
+    name: check + clippy (native)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Keep the native and wasm jobs in separate cache entries; they build
+          # disjoint sets of artifacts and would otherwise thrash one another.
+          shared-key: native
+      # Deliberately no system packages installed. Every crate in this graph
+      # that uses pkg-config at build time is a no-op for `cargo check` here:
+      #   - wayland-sys: winit enables its `dlopen` feature, and the build
+      #     script returns early before probing when that feature is on.
+      #   - x11-dl: treats a failed pkg-config lookup as `None` and continues.
+      #   - khronos-egl / ash: only link system libs under their `static` /
+      #     `linked` features; this graph uses `dynamic` / `loaded` instead.
+      # `cargo check` also never runs the renderer, so no GPU, display server
+      # or xvfb is required.
+      - run: cargo clippy -- -D warnings
+      - run: cargo check
+
+  wasm:
+    name: check + clippy (wasm32)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: wasm
+      # This job is the entire point of the workflow: roughly half of this
+      # crate's cfg branches are `target_arch = "wasm32"` only and are never
+      # type-checked by the native job above.
+      - run: cargo clippy --target wasm32-unknown-unknown -- -D warnings
+      - run: cargo check --target wasm32-unknown-unknown

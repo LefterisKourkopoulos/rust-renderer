@@ -1,2 +1,8 @@
 # Target Files
 /target/*
+
+# wasm-pack Output
+/pkg
+
+# macOS Files
+.DS_Store
