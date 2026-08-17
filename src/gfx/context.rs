@@ -102,8 +102,6 @@ impl GpuContext {
             | wgpu::CurrentSurfaceTexture::Occluded
             | wgpu::CurrentSurfaceTexture::Validation => Ok(None),
             wgpu::CurrentSurfaceTexture::Outdated => {
-                // Stale configuration, e.g. the window was resized mid-frame.
-                // Reconfigure and pick the frame up on the next tick.
                 self.surface.configure(&self.device, &self.config);
                 Ok(None)
             }

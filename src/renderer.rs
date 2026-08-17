@@ -7,6 +7,7 @@ use crate::scene::model::{DrawModel, ModelVertex};
 
 pub struct Renderer {
     render_pipeline: wgpu::RenderPipeline,
+    light_pipeline: wgpu::RenderPipeline,
     depth_texture: Texture,
     depth_debug: DepthDebug,
     config: RendererConfig,
@@ -18,7 +19,8 @@ impl Renderer {
             Texture::create_depth_texture(&ctx.device, &ctx.config, "depth_texture");
         let depth_debug = DepthDebug::new(&ctx.device, &depth_texture, ctx.config.format);
 
-        let shader = ctx
+        // Instance Rendering Pipeline
+        let instance_shader = ctx
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Shader"),
@@ -32,9 +34,33 @@ impl Renderer {
                 bind_group_layouts: &[
                     scene.texture_bind_group_layout(),
                     scene.camera.bind_group_layout(),
+                    &scene.light.bind_group_layout
                 ],
-                shader: &shader,
+                shader: &instance_shader,
                 vertex_buffers: &[ModelVertex::desc(), InstanceRaw::desc()],
+                color_format: ctx.config.format,
+                depth_write: true,
+            },
+        );
+
+        // Light Rendering Pipeline
+        let light_shader = ctx
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("Light"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/light.wgsl").into()),
+            });
+
+        let light_pipeline = create_render_pipeline(
+            &ctx.device,
+            &pipeline::RenderPipelineConfig {
+                label: "Light Pipeline",
+                bind_group_layouts: &[
+                    scene.camera.bind_group_layout(),
+                    &scene.light.bind_group_layout
+                ],
+                shader: &light_shader,
+                vertex_buffers: &[ModelVertex::desc()],
                 color_format: ctx.config.format,
                 depth_write: true,
             },
@@ -42,6 +68,7 @@ impl Renderer {
 
         Self {
             render_pipeline,
+            light_pipeline,
             depth_texture,
             depth_debug,
             config,
@@ -105,7 +132,15 @@ impl Renderer {
                 0..scene.instances.len() as u32,
                 scene.camera.bind_group(),
                 scene.diffuse_override(),
+                &scene.light.bind_group
             );
+
+            render_pass.set_pipeline(&self.light_pipeline);
+            render_pass.set_vertex_buffer(0, scene.light.vertex_buffer.slice(..));
+            render_pass.set_index_buffer(scene.light.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            render_pass.set_bind_group(0, scene.camera.bind_group(), &[]);
+            render_pass.set_bind_group(1, &scene.light.bind_group, &[]);
+            render_pass.draw_indexed(0..scene.light.num_indices, 0, 0..1);
         }
 
         self.depth_debug.draw(&mut encoder, &view);

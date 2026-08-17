@@ -1,12 +1,14 @@
 pub mod camera;
 pub mod instance;
 pub mod model;
+pub mod light;
 
 use wgpu::util::DeviceExt;
 
 use crate::assets;
 use crate::config::SceneConfig;
 use crate::gfx::{GpuContext, Texture};
+use light::{Light};
 use camera::{CameraMove, CameraState};
 use instance::Instance;
 use model::Model;
@@ -16,6 +18,7 @@ pub struct Scene {
     pub instances: Vec<Instance>,
     pub instance_buffer: wgpu::Buffer,
     pub camera: CameraState,
+    pub light: Light,
     texture_bind_group_layout: wgpu::BindGroupLayout,
     diffuse_overrides: Vec<DiffuseOverride>,
     diffuse_override: Option<usize>,
@@ -29,6 +32,7 @@ struct DiffuseOverride {
 
 impl Scene {
     pub async fn new(ctx: &GpuContext, config: &SceneConfig) -> anyhow::Result<Self> {
+        // Instances
         let instances = Instance::grid(&config.grid);
         let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
         let instance_buffer = ctx
@@ -39,12 +43,13 @@ impl Scene {
                 usage: wgpu::BufferUsages::VERTEX,
             });
 
+        // Textures
         let texture_bind_group_layout = Texture::bind_group_layout(
             &ctx.device,
             wgpu::TextureSampleType::Float { filterable: true },
             "texture_bind_group_layout",
         );
-
+        
         let override_names = ["happy-tree.png", "centrica_logo.png"];
 
         let mut diffuse_overrides = Vec::with_capacity(override_names.len());
@@ -61,8 +66,10 @@ impl Scene {
             });
         }
 
+        // Camera
         let camera = CameraState::new(&ctx.device, &ctx.config, &config.camera);
 
+        // Model
         let obj_model = assets::load_model(
             config.model_file,
             &ctx.device,
@@ -71,11 +78,19 @@ impl Scene {
         )
         .await?;
 
+        // Lights
+        let light = Light::new(
+            &ctx.device,
+            [2.0, 2.0, 2.0],
+            [1.0, 1.0, 1.0]
+        );
+
         Ok(Self {
             obj_model,
             instances,
             instance_buffer,
             camera,
+            light,
             texture_bind_group_layout,
             diffuse_overrides,
             diffuse_override: None,
@@ -110,5 +125,6 @@ impl Scene {
 
     pub fn update(&mut self, queue: &wgpu::Queue, dt: f32) {
         self.camera.update(queue, dt);
+        self.light.update(queue, dt);
     }
 }

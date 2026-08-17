@@ -31,7 +31,7 @@ impl Default for CameraConfig {
             fovy: 45.0,
             znear: 0.1,
             zfar: 100.0,
-            eye: [0.0, 1.0, 2.0],
+            eye: [5.0, 5.0, 5.0],
             target: [0.0, 0.0, 0.0],
         }
     }

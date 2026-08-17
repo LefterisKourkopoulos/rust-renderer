@@ -143,6 +143,7 @@ impl ApplicationHandler<Engine> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         #[allow(unused_mut)]
         let mut window_attributes = Window::default_attributes();
+        window_attributes.title = String::from("WebGPU Renderer");
 
         #[cfg(target_arch = "wasm32")]
         {
