@@ -15,9 +15,6 @@ use crate::renderer::Renderer;
 use crate::scene::Scene;
 use crate::scene::camera::CameraMove;
 
-// `std::time::Instant` panics on wasm32-unknown-unknown (there is no monotonic
-// clock in the target's std), so the web build reads the browser's clock via
-// web-time instead. `Duration` is pure arithmetic and works on both.
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
 #[cfg(target_arch = "wasm32")]
@@ -28,9 +25,6 @@ use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use winit::platform::web::EventLoopExtWebSys;
 
-/// Something the user asked for, named by intent rather than by input device.
-/// The keyboard mapping lives in [`action_for_key`]; adding a gamepad or UI
-/// button means producing these, and nothing downstream changes.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Action {
     Exit,
@@ -42,8 +36,6 @@ pub enum Action {
     },
 }
 
-/// Translates a physical key to an [`Action`]. The one-shot actions only fire on
-/// press; movement tracks press and release so the camera knows what is held.
 fn action_for_key(key_code: KeyCode, is_pressed: bool) -> Option<Action> {
     let movement = |direction| {
         Some(Action::MoveCamera {
@@ -64,8 +56,6 @@ fn action_for_key(key_code: KeyCode, is_pressed: bool) -> Option<Action> {
     }
 }
 
-/// The three long-lived pieces plus the window they present to. Created once the
-/// window exists, which on the web is only after an async round trip.
 pub struct Engine {
     window: Arc<Window>,
     ctx: GpuContext,
@@ -90,7 +80,6 @@ impl Engine {
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
-        // Zero-sized surfaces are invalid, and a minimised window reports one.
         if width == 0 || height == 0 {
             return;
         }
@@ -102,7 +91,6 @@ impl Engine {
 
     fn apply(&mut self, action: Action) {
         match action {
-            // Handled by the caller, which owns the event loop.
             Action::Exit => {}
             Action::CycleDiffuse => self.scene.cycle_diffuse(),
             Action::ToggleDepthDebug => self.renderer.toggle_depth_debug(),
@@ -113,8 +101,6 @@ impl Engine {
         }
     }
 
-    /// Applies queued actions, then advances the scene by the time since the
-    /// previous update so motion is framerate independent.
     fn update(&mut self, actions: &[Action]) {
         for action in actions {
             self.apply(*action);
@@ -136,13 +122,10 @@ pub struct App {
     #[cfg(target_arch = "wasm32")]
     proxy: Option<winit::event_loop::EventLoopProxy<Engine>>,
     engine: Option<Engine>,
-    /// Actions collected since the last frame, drained by `update`.
     pending_actions: Vec<Action>,
 }
 
 impl App {
-    // No `Default` impl: the constructor takes an event loop on wasm32, so the
-    // two targets cannot share one argument-free signature.
     #[allow(clippy::new_without_default)]
     pub fn new(#[cfg(target_arch = "wasm32")] event_loop: &EventLoop<Engine>) -> Self {
         #[cfg(target_arch = "wasm32")]
@@ -184,8 +167,6 @@ impl ApplicationHandler<Engine> for App {
 
         #[cfg(target_arch = "wasm32")]
         {
-            // The web build cannot block on the device request, so the finished
-            // engine is delivered back to the event loop as a user event.
             if let Some(proxy) = self.proxy.take() {
                 wasm_bindgen_futures::spawn_local(async move {
                     assert!(
@@ -234,9 +215,6 @@ impl ApplicationHandler<Engine> for App {
                 self.pending_actions.clear();
 
                 let result = engine.render();
-                // Requesting the next redraw here (rather than inside the render
-                // path) keeps the loop running continuously even on frames that
-                // were skipped.
                 engine.window.request_redraw();
 
                 if let Err(e) = result {
@@ -253,8 +231,6 @@ impl ApplicationHandler<Engine> for App {
                     },
                 ..
             } => match action_for_key(code, key_state.is_pressed()) {
-                // Exit needs the event loop, which the engine deliberately has
-                // no access to, so it is the one action handled right here.
                 Some(Action::Exit) => event_loop.exit(),
                 Some(action) => self.pending_actions.push(action),
                 None => {}

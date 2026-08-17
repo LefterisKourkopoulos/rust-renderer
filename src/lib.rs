@@ -1,9 +1,3 @@
-//! A small wgpu renderer.
-//!
-//! The crate is split so that each layer only knows about the one below it:
-//! [`gfx`] is reusable GPU plumbing, [`scene`] is the data being drawn,
-//! [`renderer`] turns one into the other, and [`app`] owns the window and input.
-
 pub mod app;
 pub mod assets;
 pub mod config;

@@ -11,10 +11,6 @@ pub struct Texture {
 impl Texture {
     pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
-    /// The layout every texture-and-sampler bind group in this crate uses:
-    /// binding 0 is the view, binding 1 is a filtering sampler, both visible to
-    /// the fragment stage. `sample_type` is the only thing that varies —
-    /// `Float { filterable: true }` for color, `Depth` for the depth buffer.
     pub fn bind_group_layout(
         device: &wgpu::Device,
         sample_type: wgpu::TextureSampleType,
@@ -43,8 +39,6 @@ impl Texture {
         })
     }
 
-    /// Binds this texture's own view and sampler against a layout built by
-    /// [`Self::bind_group_layout`].
     pub fn bind_group(
         &self,
         device: &wgpu::Device,
@@ -54,10 +48,6 @@ impl Texture {
         self.bind_group_with_sampler(device, layout, &self.sampler, label)
     }
 
-    /// Same as [`Self::bind_group`] but with a caller-supplied sampler. Needed
-    /// for the depth buffer: the sampler built by [`Self::create_depth_texture`]
-    /// is a comparison sampler, which cannot fill a `Filtering` binding, so a
-    /// pass that samples depth as plain values brings its own.
     pub fn bind_group_with_sampler(
         &self,
         device: &wgpu::Device,

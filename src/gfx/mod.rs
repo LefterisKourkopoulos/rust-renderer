@@ -1,6 +1,3 @@
-//! Reusable GPU plumbing. Nothing in here knows about this app's scene, input
-//! or window handling, so it can be lifted into another project as-is.
-
 pub mod context;
 pub mod pipeline;
 pub mod texture;

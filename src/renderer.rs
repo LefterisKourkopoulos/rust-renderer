@@ -5,9 +5,6 @@ use crate::scene::Scene;
 use crate::scene::instance::InstanceRaw;
 use crate::scene::model::{DrawModel, ModelVertex};
 
-/// Owns the pipeline and the size-dependent attachments, and turns a [`Scene`]
-/// into one frame of commands. Holds no window handle, so it never drives the
-/// event loop — the caller decides when to draw.
 pub struct Renderer {
     render_pipeline: wgpu::RenderPipeline,
     depth_texture: Texture,
@@ -51,8 +48,6 @@ impl Renderer {
         }
     }
 
-    /// Recreates the depth attachment at the new size. The debug overlay's bind
-    /// group views that texture, so it has to be rebuilt in step with it.
     pub fn resize(&mut self, ctx: &GpuContext) {
         self.depth_texture =
             Texture::create_depth_texture(&ctx.device, &ctx.config, "depth_texture");
@@ -64,8 +59,6 @@ impl Renderer {
     }
 
     pub fn render(&mut self, ctx: &mut GpuContext, scene: &Scene) -> anyhow::Result<()> {
-        // No frame available yet — the surface may still be unconfigured or was
-        // just reconfigured. Skipping is normal, not an error.
         let Some(output) = ctx.acquire_frame()? else {
             return Ok(());
         };
@@ -106,11 +99,7 @@ impl Renderer {
             });
 
             render_pass.set_pipeline(&self.render_pipeline);
-            // Slot 0 is set per-mesh by draw_model_instanced; slot 1 is the shared instance data.
             render_pass.set_vertex_buffer(1, scene.instance_buffer.slice(..));
-
-            // The Space key overrides the model's own diffuse texture; None uses each
-            // mesh's material as authored in the .mtl.
             render_pass.draw_model_instanced(
                 &scene.obj_model,
                 0..scene.instances.len() as u32,

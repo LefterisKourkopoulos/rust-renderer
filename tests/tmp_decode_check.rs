@@ -14,8 +14,6 @@ fn decodes_all_embedded_image_assets() {
         let rgba = img.to_rgba8();
         assert!(w > 0 && h > 0, "{name} has zero dimensions");
         assert_eq!(rgba.len() as u32, w * h * 4, "{name} rgba size mismatch");
-        // A decoder that silently produced a blank buffer would still pass the
-        // size checks, so require actual variation in the pixel data.
         let first = rgba.as_raw()[0];
         assert!(
             rgba.as_raw().iter().any(|&b| b != first),

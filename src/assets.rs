@@ -1,10 +1,3 @@
-//! Asset loading.
-//!
-//! Every asset is embedded in the binary at compile time, so the same code path
-//! serves native and web: no runtime file IO, no HTTP fetch, and the binary is
-//! relocatable instead of pointing at the `target/` directory it was built in.
-//! The asset set is tiny and fixed, which is what makes this affordable.
-
 use std::io::{BufReader, Cursor};
 
 use anyhow::anyhow;
@@ -13,10 +6,6 @@ use wgpu::util::DeviceExt;
 use crate::gfx::Texture;
 use crate::scene::model;
 
-/// The embedded asset registry, keyed by file name. Names are what callers and
-/// the asset files themselves use to refer to each other: the .obj names its
-/// .mtl and the .mtl names its textures, both as bare file names, so a lookup
-/// by name is all the loaders below need.
 const ASSETS: &[(&str, &[u8])] = &[
     ("cube.obj", include_bytes!("res/cube.obj")),
     ("cube.mtl", include_bytes!("res/cube.mtl")),
@@ -26,8 +15,6 @@ const ASSETS: &[(&str, &[u8])] = &[
     ("centrica_logo.png", include_bytes!("res/centrica_logo.png")),
 ];
 
-/// The bytes of an embedded asset. Errors name the asset, since a miss here is
-/// a missing [`ASSETS`] entry rather than anything the user can fix at runtime.
 pub fn load_binary(file_name: &str) -> anyhow::Result<&'static [u8]> {
     ASSETS
         .iter()
@@ -36,7 +23,6 @@ pub fn load_binary(file_name: &str) -> anyhow::Result<&'static [u8]> {
         .ok_or_else(|| anyhow!("no embedded asset named {file_name}"))
 }
 
-/// As [`load_binary`], for assets that are text (the .obj and .mtl files).
 pub fn load_string(file_name: &str) -> anyhow::Result<&'static str> {
     let bytes = load_binary(file_name)?;
     std::str::from_utf8(bytes).map_err(|e| anyhow!("embedded asset {file_name} is not UTF-8: {e}"))
@@ -68,9 +54,6 @@ pub async fn load_model(
             single_index: true,
             ..Default::default()
         },
-        // tobj hands us the `mtllib` name from the .obj and wants the parsed
-        // material set back, so the callback resolves that name against the
-        // registry. A miss can only be reported in tobj's own error type here.
         |p| async move {
             match load_string(&p) {
                 Ok(mat_text) => tobj::load_mtl_buf(&mut BufReader::new(Cursor::new(mat_text))),
@@ -80,6 +63,7 @@ pub async fn load_model(
     )
     .await?;
 
+    // Load materials
     let mut materials = Vec::new();
     for m in obj_materials? {
         let diffuse_texture = load_texture(&m.diffuse_texture, device, queue)?;
@@ -92,12 +76,11 @@ pub async fn load_model(
         })
     }
 
+    // Load meshes
     let meshes = models
         .into_iter()
         .enumerate()
         .map(|(mesh_index, m)| {
-            // tobj leaves `name` empty for an unnamed `o` group, so fall back to
-            // something that still identifies the mesh in GPU labels.
             let name = if m.name.is_empty() {
                 format!("{file_name}#{mesh_index}")
             } else {
@@ -106,8 +89,6 @@ pub async fn load_model(
 
             let vertices = (0..m.mesh.positions.len() / 3)
                 .map(|i| {
-                    // Both are optional in an .obj: indexing them unguarded
-                    // panics on a mesh without UVs or without normals.
                     let tex_coords = if m.mesh.texcoords.is_empty() {
                         [0.0, 0.0]
                     } else {

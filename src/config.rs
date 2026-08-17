@@ -1,9 +1,3 @@
-//! Tunables for the renderer and the scene.
-//!
-//! Every `Default` here reproduces the values that used to be inlined at the
-//! call sites, so `Default::default()` is the shipped configuration.
-
-/// Settings that affect how a frame is drawn rather than what is in it.
 pub struct RendererConfig {
     pub clear_color: wgpu::Color,
 }
@@ -22,9 +16,7 @@ impl Default for RendererConfig {
 }
 
 pub struct CameraConfig {
-    /// Movement speed in world units per second.
     pub speed: f32,
-    /// Vertical field of view, in degrees.
     pub fovy: f32,
     pub znear: f32,
     pub zfar: f32,
@@ -35,8 +27,6 @@ pub struct CameraConfig {
 impl Default for CameraConfig {
     fn default() -> Self {
         Self {
-            // The controller used to move a flat 0.2 units per frame; 12.0/s is
-            // the same distance at 60fps, but now independent of framerate.
             speed: 12.0,
             fovy: 45.0,
             znear: 0.1,
@@ -61,11 +51,9 @@ impl Default for InstanceGridConfig {
     }
 }
 
-/// Describes the contents of the scene: what is loaded and where it is placed.
 pub struct SceneConfig {
     pub camera: CameraConfig,
     pub grid: InstanceGridConfig,
-    /// Resolved by [`crate::assets`], so it is a name and not a path.
     pub model_file: &'static str,
 }
 

@@ -1,16 +1,11 @@
 use crate::gfx::texture;
 
-/// Everything that actually varies between this project's render pipelines.
-/// Anything not listed here (blending, topology, winding, multisampling) is
-/// fixed at the defaults below, so a new pass only spells out what differs.
 pub struct RenderPipelineConfig<'a> {
     pub label: &'a str,
     pub bind_group_layouts: &'a [&'a wgpu::BindGroupLayout],
     pub shader: &'a wgpu::ShaderModule,
     pub vertex_buffers: &'a [wgpu::VertexBufferLayout<'a>],
     pub color_format: wgpu::TextureFormat,
-    /// `true` for passes that render geometry against the depth buffer; `false`
-    /// for fullscreen passes that only sample it.
     pub depth_write: bool,
 }
 

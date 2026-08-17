@@ -7,8 +7,6 @@ use crate::gfx::{Texture, Vertex};
 pub struct ModelVertex {
     pub position: [f32; 3],
     pub tex_coords: [f32; 2],
-    /// Uploaded and described in [`Vertex::desc`] ready for forthcoming lighting
-    /// work; `shaders/shader.wgsl` does not consume it yet.
     pub normal: [f32; 3],
 }
 
@@ -45,16 +43,13 @@ pub struct Model {
 }
 
 pub struct Material {
-    /// From the .mtl file; labels this material's bind group.
     pub name: String,
-    // Kept so the texture and sampler outlive the bind group that views them.
     #[allow(dead_code)]
     pub diffuse_texture: Texture,
     pub bind_group: wgpu::BindGroup,
 }
 
 pub struct Mesh {
-    /// From the .obj file; labels this mesh's vertex and index buffers.
     pub name: String,
     pub vertex_buffer: wgpu::Buffer,
     pub index_buffer: wgpu::Buffer,
@@ -63,8 +58,6 @@ pub struct Mesh {
 }
 
 pub trait DrawModel<'a> {
-    /// Draws a single mesh with one instance.
-    // Part of the trait's public API; not used by this crate's render path yet.
     #[allow(dead_code)]
     fn draw_mesh(
         &mut self,

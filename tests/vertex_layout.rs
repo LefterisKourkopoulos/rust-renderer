@@ -1,10 +1,3 @@
-//! Guards the hand-written vertex buffer layouts against silent drift.
-//!
-//! The offsets in `desc()` are spelled out as `size_of::<[f32; N]>()` sums, so
-//! adding or reordering a field changes the struct without changing the layout
-//! the shader is told about. These tests pin both together. They only inspect
-//! CPU-side descriptors, so no GPU is involved.
-
 use std::mem::size_of;
 
 use rust_renderer::Vertex;
@@ -77,7 +70,6 @@ fn instance_raw_layout_is_four_consecutive_vec4_columns() {
     );
     assert_eq!(desc.step_mode, wgpu::VertexStepMode::Instance);
 
-    // Locations 0..=2 belong to ModelVertex, so the matrix starts at 5.
     let expected = [(0, 5), (16, 6), (32, 7), (48, 8)];
 
     assert_eq!(desc.attributes.len(), expected.len());

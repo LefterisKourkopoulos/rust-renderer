@@ -1,12 +1,7 @@
 use crate::gfx::pipeline::{self, RenderPipelineConfig};
 use crate::gfx::texture::Texture;
 
-/// Debug overlay that samples the depth buffer and draws it to the screen as
-/// grayscale. Owns its own sampler, layout, bind group and pipeline so the
-/// renderer only has to hold one field and call `draw`.
 pub struct DepthDebug {
-    /// A plain filtering sampler. The depth texture's own sampler is a
-    /// comparison sampler, which this pass cannot use.
     sampler: wgpu::Sampler,
     bind_group_layout: wgpu::BindGroupLayout,
     bind_group: wgpu::BindGroup,
@@ -53,7 +48,6 @@ impl DepthDebug {
                 label: "Depth Debug Pipeline",
                 bind_group_layouts: &[&bind_group_layout],
                 shader: &shader,
-                // The fullscreen triangle is built from the vertex index alone.
                 vertex_buffers: &[],
                 color_format,
                 depth_write: false,
@@ -69,8 +63,6 @@ impl DepthDebug {
         }
     }
 
-    /// Rebinds against the recreated depth texture. Must be called whenever the
-    /// depth texture is resized, or the bind group points at a stale view.
     pub fn resize(&mut self, device: &wgpu::Device, depth_texture: &Texture) {
         self.bind_group = depth_texture.bind_group_with_sampler(
             device,
@@ -84,7 +76,6 @@ impl DepthDebug {
         self.enabled = !self.enabled;
     }
 
-    /// Draws the overlay over the existing color attachment. No-op when disabled.
     pub fn draw(&self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
         if !self.enabled {
             return;

@@ -3,7 +3,6 @@ use wgpu::util::DeviceExt;
 
 use crate::config::CameraConfig;
 
-/// cgmath builds OpenGL-style projections with depth in -1..1; wgpu expects 0..1.
 #[rustfmt::skip]
 pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::from_cols(
     cgmath::Vector4::new(1.0, 0.0, 0.0, 0.0),
@@ -12,9 +11,6 @@ pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::from_co
     cgmath::Vector4::new(0.0, 0.0, 0.5, 1.0),
 );
 
-/// A direction the camera can be asked to move in. Backend-agnostic on purpose:
-/// the input layer decides what a keyboard, gamepad or touch drag maps to, and
-/// the camera only ever sees these.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum CameraMove {
     Forward,
@@ -60,9 +56,7 @@ impl CameraUniform {
     }
 }
 
-/// Tracks which directions are currently held and applies them to the camera.
 struct CameraController {
-    /// World units per second.
     speed: f32,
     is_forward_pressed: bool,
     is_backward_pressed: bool,
@@ -90,8 +84,6 @@ impl CameraController {
         }
     }
 
-    /// `dt` is seconds since the last update, so movement is framerate
-    /// independent rather than a fixed step per frame.
     fn update_camera(&self, camera: &mut Camera, dt: f32) {
         let step = self.speed * dt;
 
@@ -99,7 +91,6 @@ impl CameraController {
         let forward_norm = forward.normalize();
         let forward_mag = forward.magnitude();
 
-        // Stop short of the target rather than passing through it.
         if self.is_forward_pressed && forward_mag > step {
             camera.eye += forward_norm * step;
         }
@@ -111,8 +102,6 @@ impl CameraController {
         let forward = camera.target - camera.eye;
         let forward_mag = forward.magnitude();
 
-        // Renormalising back to the original distance keeps the camera orbiting
-        // on its sphere around the target instead of drifting outwards.
         if self.is_right_pressed {
             camera.eye = camera.target - (forward + right * step).normalize() * forward_mag;
         }
@@ -122,8 +111,6 @@ impl CameraController {
     }
 }
 
-/// The camera plus the GPU resources that expose it to shaders. Bundling these
-/// keeps the uniform buffer and its bind group in sync with the camera state.
 pub struct CameraState {
     camera: Camera,
     uniform: CameraUniform,
@@ -199,8 +186,6 @@ impl CameraState {
         &self.bind_group_layout
     }
 
-    /// Keeps the projection matching the window, otherwise the scene stretches
-    /// when the aspect ratio changes.
     pub fn resize(&mut self, width: u32, height: u32) {
         self.camera.aspect = width as f32 / height as f32;
     }
@@ -209,8 +194,6 @@ impl CameraState {
         self.controller.set_move(direction, is_pressed);
     }
 
-    /// Applies pending input and uploads the new view-projection matrix.
-    /// `dt` is seconds elapsed since the previous update.
     pub fn update(&mut self, queue: &wgpu::Queue, dt: f32) {
         self.controller.update_camera(&mut self.camera, dt);
         self.uniform.update_view_proj(&self.camera);
@@ -231,7 +214,6 @@ mod tests {
         );
     }
 
-    /// A camera looking down -z from 10 units out, so distances are easy to read.
     fn test_camera() -> Camera {
         Camera {
             eye: (0.0, 0.0, 10.0).into(),
@@ -273,7 +255,6 @@ mod tests {
 
         controller.update_camera(&mut camera, 0.5);
 
-        // 2.0 units/s for half a second is one unit closer.
         assert_close(camera.eye.z, 9.0, "eye z after forward");
         assert_close(camera.eye.x, 0.0, "eye x is unchanged");
         assert_close(camera.eye.y, 0.0, "eye y is unchanged");
@@ -296,8 +277,6 @@ mod tests {
         let mut controller = CameraController::new(2.0);
         controller.set_move(CameraMove::Forward, true);
 
-        // A step of 40 units would overshoot the target 10 units away, so the
-        // guard skips the move entirely rather than clamping to the target.
         controller.update_camera(&mut camera, 20.0);
 
         assert_close(camera.eye.z, 10.0, "eye is left where it was");
@@ -345,7 +324,6 @@ mod tests {
 
         let distance = (camera.eye - camera.target).magnitude();
         assert_close(distance, start_distance, "orbit radius");
-        // `right` is forward x up, i.e. -x for a camera looking down -z.
         assert!(
             camera.eye.x < 0.0,
             "right strafe moves the eye to -x, got {}",

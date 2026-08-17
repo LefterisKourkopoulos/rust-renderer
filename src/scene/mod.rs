@@ -1,5 +1,3 @@
-//! What is being drawn: the loaded model, its instances, and the camera.
-
 pub mod camera;
 pub mod instance;
 pub mod model;
@@ -13,27 +11,16 @@ use camera::{CameraMove, CameraState};
 use instance::Instance;
 use model::Model;
 
-/// The scene owns its GPU buffers alongside the CPU-side data that produced
-/// them, so the two can never drift apart.
 pub struct Scene {
     pub obj_model: Model,
     pub instances: Vec<Instance>,
     pub instance_buffer: wgpu::Buffer,
     pub camera: CameraState,
-    /// The layout shared by the model's per-material bind groups and the
-    /// override bind groups below; they are interchangeable at draw time only
-    /// because they were built from this one layout.
     texture_bind_group_layout: wgpu::BindGroupLayout,
-    /// Extra diffuse textures the Space key can substitute for the model's own
-    /// material. Add an entry here and the cycle picks it up.
     diffuse_overrides: Vec<DiffuseOverride>,
-    /// Index into `diffuse_overrides`; `None` means "use each mesh's material".
     diffuse_override: Option<usize>,
 }
 
-/// One selectable override texture. The bind group is built up front so that
-/// cycling is a plain index change with no GPU work in the input path; the
-/// texture is kept because its view and sampler must outlive that bind group.
 struct DiffuseOverride {
     #[allow(dead_code)]
     texture: Texture,
@@ -99,14 +86,11 @@ impl Scene {
         &self.texture_bind_group_layout
     }
 
-    /// The override to draw with, or `None` to use each mesh's own material.
     pub fn diffuse_override(&self) -> Option<&wgpu::BindGroup> {
         self.diffuse_override
             .map(|index| &self.diffuse_overrides[index].bind_group)
     }
 
-    /// Steps through the override textures and back to the material:
-    /// material -> first override -> ... -> last override -> material.
     pub fn cycle_diffuse(&mut self) {
         self.diffuse_override = match self.diffuse_override {
             None if self.diffuse_overrides.is_empty() => None,
@@ -124,7 +108,6 @@ impl Scene {
         self.camera.resize(width, height);
     }
 
-    /// Advances the scene by `dt` seconds and uploads whatever changed.
     pub fn update(&mut self, queue: &wgpu::Queue, dt: f32) {
         self.camera.update(queue, dt);
     }

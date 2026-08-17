@@ -17,8 +17,6 @@ impl Instance {
         }
     }
 
-    /// Builds an NxN grid of instances on the XZ plane, each rotated about its
-    /// own offset from the origin.
     pub fn grid(config: &InstanceGridConfig) -> Vec<Self> {
         let per_row = config.instances_per_row;
         let space_between = config.space_between;
@@ -32,7 +30,6 @@ impl Instance {
                     let position = cgmath::Vector3 { x, y: 0.0, z };
 
                     let rotation = if position.is_zero() {
-                        // A zero vector is not a valid rotation axis.
                         cgmath::Quaternion::from_axis_angle(
                             cgmath::Vector3::unit_z(),
                             cgmath::Deg(0.0),
@@ -60,7 +57,6 @@ impl Vertex for InstanceRaw {
         wgpu::VertexBufferLayout {
             array_stride: mem::size_of::<InstanceRaw>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Instance,
-            // A mat4x4 is passed as four consecutive vec4 attributes.
             attributes: &[
                 wgpu::VertexAttribute {
                     offset: 0,
@@ -100,7 +96,6 @@ mod tests {
         );
     }
 
-    /// The values the app ships with, so the numbers below are the real ones.
     fn default_config() -> InstanceGridConfig {
         InstanceGridConfig::default()
     }
@@ -130,7 +125,6 @@ mod tests {
         let per_row = config.instances_per_row as usize;
         let instances = Instance::grid(&config);
 
-        // Instances are emitted x-major within each z row.
         for row in 0..per_row {
             for column in 1..per_row {
                 let previous = &instances[row * per_row + column - 1];
@@ -149,7 +143,6 @@ mod tests {
             }
         }
 
-        // Consecutive rows are one gap apart in z.
         for row in 1..per_row {
             let previous = &instances[(row - 1) * per_row];
             let current = &instances[row * per_row];
@@ -165,11 +158,6 @@ mod tests {
     fn grid_is_offset_by_half_a_row_rather_than_centred() {
         let config = default_config();
         let instances = Instance::grid(&config);
-
-        // `space_between * (x - per_row / 2.0)` puts a cell exactly on the
-        // origin, which for an even `per_row` leaves one extra column on the
-        // negative side: 10 columns run -15.0..=12.0, not -13.5..=13.5. This is
-        // the shipped look, so assert the offset grid rather than "fixing" it.
         let min_x = instances
             .iter()
             .fold(f32::INFINITY, |a, i| a.min(i.position.x));
@@ -186,8 +174,6 @@ mod tests {
     fn origin_instance_gets_a_finite_identity_rotation() {
         let instances = Instance::grid(&default_config());
 
-        // `position.normalize()` on the zero vector is NaN, so the origin cell
-        // takes the guarded branch instead.
         let origin = instances
             .iter()
             .find(|i| i.position.is_zero())
@@ -221,7 +207,6 @@ mod tests {
         let instance = instances.last().expect("grid is not empty");
         let raw = instance.to_raw();
 
-        // Column-major, so the last column is the translation.
         assert_close(raw.model[3][0], instance.position.x, "translation x");
         assert_close(raw.model[3][1], instance.position.y, "translation y");
         assert_close(raw.model[3][2], instance.position.z, "translation z");
@@ -237,7 +222,6 @@ mod tests {
         let instances = Instance::grid(&config);
 
         assert_eq!(instances.len(), 1);
-        // Same half-row offset as above: 3.0 * (0 - 0.5).
         assert_close(instances[0].position.x, -1.5, "single instance x");
         assert_close(instances[0].position.z, -1.5, "single instance z");
     }

@@ -2,19 +2,11 @@ use std::sync::Arc;
 
 use winit::window::Window;
 
-/// Owns the wgpu handles that live for the whole run: the surface we present
-/// to, the device/queue we record work on, and the surface's current
-/// configuration.
-///
-/// Deliberately free of any app-specific knowledge — it has no idea what is
-/// being drawn, only how to hand out frames to draw into.
 pub struct GpuContext {
     pub surface: wgpu::Surface<'static>,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub config: wgpu::SurfaceConfiguration,
-    /// The surface starts out unconfigured; the first `resize` sizes it. Until
-    /// then there is nothing valid to render into.
     pub is_surface_configured: bool,
 }
 
@@ -33,8 +25,6 @@ impl GpuContext {
             display: None,
         });
 
-        // The surface borrows the window, so it is created from the same Arc the
-        // app holds and is 'static for as long as that Arc lives.
         let surface = instance.create_surface(window.clone()).unwrap();
 
         let adapter = instance
@@ -63,8 +53,6 @@ impl GpuContext {
 
         let surface_caps = surface.get_capabilities(&adapter);
 
-        // Prefer an sRGB target so the shader can write linear colors and let the
-        // hardware do the conversion.
         let surface_format = surface_caps
             .formats
             .iter()
@@ -93,9 +81,6 @@ impl GpuContext {
         })
     }
 
-    /// Reconfigures the surface for a new size. Size-dependent resources owned
-    /// elsewhere (the depth texture, the camera's aspect ratio) are the caller's
-    /// responsibility.
     pub fn resize(&mut self, width: u32, height: u32) {
         if width > 0 && height > 0 {
             self.config.width = width;
@@ -104,12 +89,7 @@ impl GpuContext {
             self.is_surface_configured = true;
         }
     }
-
-    /// Tries to get the next frame to render into.
-    ///
-    /// `Ok(None)` means "no frame this time, try again next tick" — the surface
-    /// isn't ready yet, the frame timed out, or it was reconfigured underneath
-    /// us. `Err` is reserved for the unrecoverable case.
+    
     pub fn acquire_frame(&mut self) -> anyhow::Result<Option<wgpu::SurfaceTexture>> {
         if !self.is_surface_configured {
             return Ok(None);
