@@ -7,6 +7,7 @@ pub struct RenderPipelineConfig<'a> {
     pub vertex_buffers: &'a [wgpu::VertexBufferLayout<'a>],
     pub color_format: wgpu::TextureFormat,
     pub depth_write: bool,
+    pub topology: wgpu::PrimitiveTopology,
 }
 
 pub fn create_render_pipeline(
@@ -51,7 +52,7 @@ pub fn create_render_pipeline(
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         }),
         primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
+            topology: config.topology,
             strip_index_format: None,
             front_face: wgpu::FrontFace::Ccw,
             cull_mode: None,
@@ -62,7 +63,7 @@ pub fn create_render_pipeline(
         depth_stencil: config.depth_write.then(|| wgpu::DepthStencilState {
             format: texture::Texture::DEPTH_FORMAT,
             depth_write_enabled: Some(true),
-            depth_compare: Some(wgpu::CompareFunction::Less),
+            depth_compare: Some(wgpu::CompareFunction::LessEqual),
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         }),

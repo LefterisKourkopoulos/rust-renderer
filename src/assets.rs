@@ -13,6 +13,7 @@ const ASSETS: &[(&str, &[u8])] = &[
     ("cube-normal.png", include_bytes!("res/cube-normal.png")),
     ("happy-tree.png", include_bytes!("res/happy-tree.png")),
     ("centrica_logo.png", include_bytes!("res/centrica_logo.png")),
+    ("pure-sky-hdri.jpg", include_bytes!("res/pure-sky-hdri.jpg")),
 ];
 
 pub fn load_binary(file_name: &str) -> anyhow::Result<&'static [u8]> {

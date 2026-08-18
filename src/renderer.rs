@@ -8,6 +8,7 @@ use crate::scene::model::{DrawModel, ModelVertex};
 pub struct Renderer {
     render_pipeline: wgpu::RenderPipeline,
     light_pipeline: wgpu::RenderPipeline,
+    sky_pipeline: wgpu::RenderPipeline,
     depth_texture: Texture,
     depth_debug: DepthDebug,
     hdr: Option<HdrPipeline>,
@@ -50,6 +51,7 @@ impl Renderer {
                 vertex_buffers: &[ModelVertex::desc(), InstanceRaw::desc()],
                 color_format,
                 depth_write: true,
+                topology: wgpu::PrimitiveTopology::TriangleList,
             },
         );
 
@@ -73,12 +75,35 @@ impl Renderer {
                 vertex_buffers: &[ModelVertex::desc()],
                 color_format,
                 depth_write: true,
+                topology: wgpu::PrimitiveTopology::TriangleList,
+            },
+        );
+
+        // Sky Rendering Pipeline
+        let sky_shader = ctx
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("Sky"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/sky.wgsl").into()),
+            });
+
+        let sky_pipeline = create_render_pipeline(
+            &ctx.device,
+            &pipeline::RenderPipelineConfig {
+                label: "Sky Pipeline",
+                bind_group_layouts: &[scene.camera.bind_group_layout(), scene.environment_bind_group_layout()],
+                shader: &sky_shader,
+                vertex_buffers: &[],
+                color_format,
+                depth_write: true,
+                topology: wgpu::PrimitiveTopology::TriangleList,
             },
         );
 
         Self {
             render_pipeline,
             light_pipeline,
+            sky_pipeline,
             depth_texture,
             depth_debug,
             hdr,
@@ -157,6 +182,11 @@ impl Renderer {
             render_pass.set_bind_group(0, scene.camera.bind_group(), &[]);
             render_pass.set_bind_group(1, &scene.light.bind_group, &[]);
             render_pass.draw_indexed(0..scene.light.num_indices, 0, 0..1);
+
+            render_pass.set_pipeline(&self.sky_pipeline);
+            render_pass.set_bind_group(0, scene.camera.bind_group(), &[]);
+            render_pass.set_bind_group(1, scene.environment_bind_group(), &[]);
+            render_pass.draw(0..3, 0..1);
         }
 
         self.depth_debug.draw(&mut encoder, &view);

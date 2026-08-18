@@ -53,6 +53,7 @@ impl HdrPipeline {
                 vertex_buffers: &[],
                 color_format: config.format,
                 depth_write: false,
+                topology: wgpu::PrimitiveTopology::TriangleList,
             },
         );
 

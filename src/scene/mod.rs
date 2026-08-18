@@ -7,7 +7,7 @@ use wgpu::util::DeviceExt;
 
 use crate::assets;
 use crate::config::SceneConfig;
-use crate::gfx::{GpuContext, Texture};
+use crate::gfx::{CubeTexture, GpuContext, HdrLoader, Texture};
 use light::{Light};
 use camera::{CameraMove, CameraState};
 use instance::Instance;
@@ -22,6 +22,10 @@ pub struct Scene {
     texture_bind_group_layout: wgpu::BindGroupLayout,
     diffuse_overrides: Vec<DiffuseOverride>,
     diffuse_override: Option<usize>,
+    #[allow(dead_code)]
+    sky_texture: CubeTexture,
+    environment_bind_group_layout: wgpu::BindGroupLayout,
+    environment_bind_group: wgpu::BindGroup,
 }
 
 struct DiffuseOverride {
@@ -94,6 +98,55 @@ impl Scene {
             [1.0, 1.0, 1.0]
         );
 
+        // Skybox
+        let hdr_loader = HdrLoader::new(&ctx.device);
+        let sky_bytes = assets::load_binary("pure-sky-hdri.jpg")?;
+        let sky_texture = hdr_loader.from_equirect_bytes(
+            &ctx.device,
+            &ctx.queue,
+            sky_bytes,
+            1080,
+            Some("Sky Texture"),
+        )?;
+
+        let environment_bind_group_layout =
+            ctx.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("environment_layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::Cube,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                        count: None,
+                    },
+                ],
+            });
+
+        let environment_bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("environment_bind_group"),
+            layout: &environment_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(sky_texture.view()),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(sky_texture.sampler()),
+                },
+            ],
+        });
+
         Ok(Self {
             obj_model,
             instances,
@@ -103,11 +156,22 @@ impl Scene {
             texture_bind_group_layout,
             diffuse_overrides,
             diffuse_override: None,
+            sky_texture,
+            environment_bind_group_layout,
+            environment_bind_group,
         })
     }
 
     pub fn texture_bind_group_layout(&self) -> &wgpu::BindGroupLayout {
         &self.texture_bind_group_layout
+    }
+
+    pub fn environment_bind_group_layout(&self) -> &wgpu::BindGroupLayout {
+        &self.environment_bind_group_layout
+    }
+
+    pub fn environment_bind_group(&self) -> &wgpu::BindGroup {
+        &self.environment_bind_group
     }
 
     pub fn diffuse_override(&self) -> Option<&wgpu::BindGroup> {
