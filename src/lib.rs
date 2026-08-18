@@ -7,7 +7,7 @@ pub mod renderer;
 pub mod scene;
 
 pub use app::{Action, App, Engine, run};
-pub use config::{CameraConfig, InstanceGridConfig, RendererConfig, SceneConfig};
+pub use config::{CameraConfig, InstanceGridConfig, PipelineMode, RendererConfig, SceneConfig};
 pub use gfx::{GpuContext, Texture, Vertex};
 pub use renderer::Renderer;
 pub use scene::Scene;

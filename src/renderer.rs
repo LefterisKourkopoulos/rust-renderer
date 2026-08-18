@@ -1,6 +1,6 @@
-use crate::config::RendererConfig;
+use crate::config::{PipelineMode, RendererConfig};
 use crate::debug::DepthDebug;
-use crate::gfx::{GpuContext, Texture, Vertex, create_render_pipeline, pipeline};
+use crate::gfx::{GpuContext, HdrPipeline, Texture, Vertex, create_render_pipeline, pipeline};
 use crate::scene::Scene;
 use crate::scene::instance::InstanceRaw;
 use crate::scene::model::{DrawModel, ModelVertex};
@@ -10,6 +10,7 @@ pub struct Renderer {
     light_pipeline: wgpu::RenderPipeline,
     depth_texture: Texture,
     depth_debug: DepthDebug,
+    hdr: Option<HdrPipeline>,
     config: RendererConfig,
 }
 
@@ -18,6 +19,15 @@ impl Renderer {
         let depth_texture =
             Texture::create_depth_texture(&ctx.device, &ctx.config, "depth_texture");
         let depth_debug = DepthDebug::new(&ctx.device, &depth_texture, ctx.config.format);
+
+        let hdr = match config.pipeline_mode {
+            PipelineMode::Hdr => Some(HdrPipeline::new(&ctx.device, &ctx.config)),
+            PipelineMode::Normal => None,
+        };
+        let color_format = hdr
+            .as_ref()
+            .map(HdrPipeline::format)
+            .unwrap_or(ctx.config.format);
 
         // Instance Rendering Pipeline
         let instance_shader = ctx
@@ -38,7 +48,7 @@ impl Renderer {
                 ],
                 shader: &instance_shader,
                 vertex_buffers: &[ModelVertex::desc(), InstanceRaw::desc()],
-                color_format: ctx.config.format,
+                color_format,
                 depth_write: true,
             },
         );
@@ -61,7 +71,7 @@ impl Renderer {
                 ],
                 shader: &light_shader,
                 vertex_buffers: &[ModelVertex::desc()],
-                color_format: ctx.config.format,
+                color_format,
                 depth_write: true,
             },
         );
@@ -71,6 +81,7 @@ impl Renderer {
             light_pipeline,
             depth_texture,
             depth_debug,
+            hdr,
             config,
         }
     }
@@ -79,6 +90,9 @@ impl Renderer {
         self.depth_texture =
             Texture::create_depth_texture(&ctx.device, &ctx.config, "depth_texture");
         self.depth_debug.resize(&ctx.device, &self.depth_texture);
+        if let Some(hdr) = &mut self.hdr {
+            hdr.resize(&ctx.device, ctx.config.width, ctx.config.height);
+        }
     }
 
     pub fn toggle_depth_debug(&mut self) {
@@ -100,11 +114,13 @@ impl Renderer {
                 label: Some("Render Encoder"),
             });
 
+        let color_view = self.hdr.as_ref().map(HdrPipeline::view).unwrap_or(&view);
+
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view: color_view,
                     resolve_target: None,
                     depth_slice: None,
                     ops: wgpu::Operations {
@@ -144,6 +160,10 @@ impl Renderer {
         }
 
         self.depth_debug.draw(&mut encoder, &view);
+
+        if let Some(hdr) = &self.hdr {
+            hdr.process(&mut encoder, &view);
+        }
 
         ctx.queue.submit(std::iter::once(encoder.finish()));
         ctx.queue.present(output);

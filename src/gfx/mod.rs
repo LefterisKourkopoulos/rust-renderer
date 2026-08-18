@@ -5,6 +5,7 @@ pub mod vertex;
 pub mod hdr;
 
 pub use context::GpuContext;
+pub use hdr::HdrPipeline;
 pub use pipeline::{RenderPipelineConfig, create_render_pipeline};
 pub use texture::Texture;
 pub use vertex::Vertex;

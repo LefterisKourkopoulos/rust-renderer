@@ -1,5 +1,13 @@
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
+pub enum PipelineMode {
+    #[default]
+    Normal,
+    Hdr,
+}
+
 pub struct RendererConfig {
     pub clear_color: wgpu::Color,
+    pub pipeline_mode: PipelineMode,
 }
 
 impl Default for RendererConfig {
@@ -11,6 +19,7 @@ impl Default for RendererConfig {
                 b: 0.5,
                 a: 1.0,
             },
+            pipeline_mode: PipelineMode::default(),
         }
     }
 }
