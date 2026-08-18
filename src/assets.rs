@@ -34,7 +34,16 @@ pub fn load_texture(
     queue: &wgpu::Queue,
 ) -> anyhow::Result<Texture> {
     let data = load_binary(file_name)?;
-    Texture::from_bytes(device, queue, data, file_name)
+    Texture::from_bytes(device, queue, data, file_name, false)
+}
+
+pub fn load_normal_texture(
+    file_name: &str,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+) -> anyhow::Result<Texture> {
+    let data = load_binary(file_name)?;
+    Texture::from_bytes(device, queue, data, file_name, true)
 }
 
 pub async fn load_model(
@@ -67,11 +76,18 @@ pub async fn load_model(
     let mut materials = Vec::new();
     for m in obj_materials? {
         let diffuse_texture = load_texture(&m.diffuse_texture, device, queue)?;
-        let bind_group = diffuse_texture.bind_group(device, layout, &m.name);
+        let normal_texture = if m.normal_texture.is_empty() {
+            Texture::from_color(device, queue, [128, 128, 255, 255], true, "default_normal")
+        } else {
+            load_normal_texture(&m.normal_texture, device, queue)?
+        };
+        let bind_group =
+            Texture::material_bind_group(device, layout, &diffuse_texture, &normal_texture, &m.name);
 
         materials.push(model::Material {
             name: m.name,
             diffuse_texture,
+            normal_texture,
             bind_group,
         })
     }
@@ -87,7 +103,7 @@ pub async fn load_model(
                 m.name.clone()
             };
 
-            let vertices = (0..m.mesh.positions.len() / 3)
+            let mut vertices = (0..m.mesh.positions.len() / 3)
                 .map(|i| {
                     let tex_coords = if m.mesh.texcoords.is_empty() {
                         [0.0, 0.0]
@@ -112,9 +128,52 @@ pub async fn load_model(
                         ],
                         tex_coords,
                         normal,
+                        tangent: [0.0, 0.0, 0.0],
+                        bitangent: [0.0, 0.0, 0.0],
                     }
                 })
                 .collect::<Vec<_>>();
+
+            let mut triangle_count = vec![0u32; vertices.len()];
+            for chunk in m.mesh.indices.chunks_exact(3) {
+                let [i0, i1, i2] = [chunk[0] as usize, chunk[1] as usize, chunk[2] as usize];
+                let (pos0, pos1, pos2) = (
+                    cgmath::Vector3::from(vertices[i0].position),
+                    cgmath::Vector3::from(vertices[i1].position),
+                    cgmath::Vector3::from(vertices[i2].position),
+                );
+                let (uv0, uv1, uv2) = (
+                    cgmath::Vector2::from(vertices[i0].tex_coords),
+                    cgmath::Vector2::from(vertices[i1].tex_coords),
+                    cgmath::Vector2::from(vertices[i2].tex_coords),
+                );
+
+                let delta_pos1 = pos1 - pos0;
+                let delta_pos2 = pos2 - pos0;
+                let delta_uv1 = uv1 - uv0;
+                let delta_uv2 = uv2 - uv0;
+
+                let r = 1.0 / (delta_uv1.x * delta_uv2.y - delta_uv1.y * delta_uv2.x);
+                let tangent = (delta_pos1 * delta_uv2.y - delta_pos2 * delta_uv1.y) * r;
+                let bitangent = (delta_pos2 * delta_uv1.x - delta_pos1 * delta_uv2.x) * r;
+
+                for i in [i0, i1, i2] {
+                    vertices[i].tangent =
+                        (cgmath::Vector3::from(vertices[i].tangent) + tangent).into();
+                    vertices[i].bitangent =
+                        (cgmath::Vector3::from(vertices[i].bitangent) + bitangent).into();
+                    triangle_count[i] += 1;
+                }
+            }
+
+            for (vertex, &count) in vertices.iter_mut().zip(triangle_count.iter()) {
+                if count > 0 {
+                    vertex.tangent =
+                        (cgmath::Vector3::from(vertex.tangent) / count as f32).into();
+                    vertex.bitangent =
+                        (cgmath::Vector3::from(vertex.bitangent) / count as f32).into();
+                }
+            }
 
             let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(&format!("{name} Vertex Buffer")),

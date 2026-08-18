@@ -10,8 +10,8 @@ fn model_vertex_layout_matches_its_field_offsets() {
 
     assert_eq!(
         size_of::<ModelVertex>(),
-        32,
-        "position + tex_coords + normal"
+        56,
+        "position + tex_coords + normal + tangent + bitangent"
     );
     assert_eq!(
         desc.array_stride,
@@ -23,6 +23,8 @@ fn model_vertex_layout_matches_its_field_offsets() {
         (0, 0, wgpu::VertexFormat::Float32x3),
         (12, 1, wgpu::VertexFormat::Float32x2),
         (20, 2, wgpu::VertexFormat::Float32x3),
+        (32, 3, wgpu::VertexFormat::Float32x3),
+        (44, 4, wgpu::VertexFormat::Float32x3),
     ];
 
     assert_eq!(desc.attributes.len(), expected.len());

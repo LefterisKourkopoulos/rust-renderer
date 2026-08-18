@@ -8,6 +8,8 @@ pub struct ModelVertex {
     pub position: [f32; 3],
     pub tex_coords: [f32; 2],
     pub normal: [f32; 3],
+    pub tangent: [f32; 3],
+    pub bitangent: [f32; 3],
 }
 
 impl Vertex for ModelVertex {
@@ -32,6 +34,16 @@ impl Vertex for ModelVertex {
                     shader_location: 2,
                     format: wgpu::VertexFormat::Float32x3,
                 },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 8]>() as wgpu::BufferAddress,
+                    shader_location: 3,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 11]>() as wgpu::BufferAddress,
+                    shader_location: 4,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
             ],
         }
     }
@@ -46,6 +58,8 @@ pub struct Material {
     pub name: String,
     #[allow(dead_code)]
     pub diffuse_texture: Texture,
+    #[allow(dead_code)]
+    pub normal_texture: Texture,
     pub bind_group: wgpu::BindGroup,
 }
 

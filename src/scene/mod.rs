@@ -27,6 +27,8 @@ pub struct Scene {
 struct DiffuseOverride {
     #[allow(dead_code)]
     texture: Texture,
+    #[allow(dead_code)]
+    normal_texture: Texture,
     bind_group: wgpu::BindGroup,
 }
 
@@ -44,24 +46,31 @@ impl Scene {
             });
 
         // Textures
-        let texture_bind_group_layout = Texture::bind_group_layout(
-            &ctx.device,
-            wgpu::TextureSampleType::Float { filterable: true },
-            "texture_bind_group_layout",
-        );
-        
+        let texture_bind_group_layout =
+            Texture::material_bind_group_layout(&ctx.device, "texture_bind_group_layout");
+
         let override_names = ["happy-tree.png", "centrica_logo.png"];
 
         let mut diffuse_overrides = Vec::with_capacity(override_names.len());
         for name in override_names {
             let texture = assets::load_texture(name, &ctx.device, &ctx.queue)?;
-            let bind_group = texture.bind_group(
+            let normal_texture = Texture::from_color(
+                &ctx.device,
+                &ctx.queue,
+                [128, 128, 255, 255],
+                true,
+                "diffuse_override_default_normal",
+            );
+            let bind_group = Texture::material_bind_group(
                 &ctx.device,
                 &texture_bind_group_layout,
+                &texture,
+                &normal_texture,
                 "diffuse_override_bind_group",
             );
             diffuse_overrides.push(DiffuseOverride {
                 texture,
+                normal_texture,
                 bind_group,
             });
         }
