@@ -11,30 +11,51 @@ pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::from_co
     cgmath::Vector4::new(0.0, 0.0, 0.5, 1.0),
 );
 
+const SAFE_FRAC_PI_2: f32 = std::f32::consts::FRAC_PI_2 - 0.0001;
+
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum CameraMove {
     Forward,
     Backward,
     Left,
     Right,
+    Up,
+    Down,
 }
 
 struct Camera {
-    eye: cgmath::Point3<f32>,
-    target: cgmath::Point3<f32>,
-    up: cgmath::Vector3<f32>,
+    position: cgmath::Point3<f32>,
+    yaw: cgmath::Rad<f32>,
+    pitch: cgmath::Rad<f32>,
+}
+
+impl Camera {
+    fn calc_matrix(&self) -> cgmath::Matrix4<f32> {
+        let (sin_pitch, cos_pitch) = self.pitch.0.sin_cos();
+        let (sin_yaw, cos_yaw) = self.yaw.0.sin_cos();
+
+        cgmath::Matrix4::look_to_rh(
+            self.position,
+            cgmath::Vector3::new(cos_pitch * cos_yaw, sin_pitch, cos_pitch * sin_yaw).normalize(),
+            cgmath::Vector3::unit_y(),
+        )
+    }
+}
+
+struct Projection {
     aspect: f32,
-    fovy: f32,
+    fovy: cgmath::Rad<f32>,
     znear: f32,
     zfar: f32,
 }
 
-impl Camera {
-    fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
-        let view = cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
-        let proj = cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
+impl Projection {
+    fn resize(&mut self, width: u32, height: u32) {
+        self.aspect = width as f32 / height as f32;
+    }
 
-        proj * view
+    fn calc_matrix(&self) -> cgmath::Matrix4<f32> {
+        cgmath::perspective(self.fovy, self.aspect, self.znear, self.zfar)
     }
 }
 
@@ -53,28 +74,39 @@ impl CameraUniform {
         }
     }
 
-    fn update_view_proj(&mut self, camera: &Camera) {
-        self.view_position = camera.eye.to_homogeneous().into();
-        self.view_proj = (OPENGL_TO_WGPU_MATRIX * camera.build_view_projection_matrix()).into();
+    fn update_view_proj(&mut self, camera: &Camera, projection: &Projection) {
+        self.view_position = camera.position.to_homogeneous().into();
+        self.view_proj =
+            (OPENGL_TO_WGPU_MATRIX * projection.calc_matrix() * camera.calc_matrix()).into();
     }
 }
 
 struct CameraController {
     speed: f32,
+    sensitivity: f32,
     is_forward_pressed: bool,
     is_backward_pressed: bool,
     is_left_pressed: bool,
     is_right_pressed: bool,
+    is_up_pressed: bool,
+    is_down_pressed: bool,
+    rotate_horizontal: f32,
+    rotate_vertical: f32,
 }
 
 impl CameraController {
-    fn new(speed: f32) -> Self {
+    fn new(speed: f32, sensitivity: f32) -> Self {
         Self {
             speed,
+            sensitivity,
             is_forward_pressed: false,
             is_backward_pressed: false,
             is_left_pressed: false,
             is_right_pressed: false,
+            is_up_pressed: false,
+            is_down_pressed: false,
+            rotate_horizontal: 0.0,
+            rotate_vertical: 0.0,
         }
     }
 
@@ -84,38 +116,58 @@ impl CameraController {
             CameraMove::Backward => self.is_backward_pressed = is_pressed,
             CameraMove::Left => self.is_left_pressed = is_pressed,
             CameraMove::Right => self.is_right_pressed = is_pressed,
+            CameraMove::Up => self.is_up_pressed = is_pressed,
+            CameraMove::Down => self.is_down_pressed = is_pressed,
         }
     }
 
-    fn update_camera(&self, camera: &mut Camera, dt: f32) {
+    fn set_look(&mut self, mouse_dx: f64, mouse_dy: f64) {
+        self.rotate_horizontal += mouse_dx as f32;
+        self.rotate_vertical += mouse_dy as f32;
+    }
+
+    fn update_camera(&mut self, camera: &mut Camera, dt: f32) {
+        let (sin_yaw, cos_yaw) = camera.yaw.0.sin_cos();
+        let forward = cgmath::Vector3::new(cos_yaw, 0.0, sin_yaw).normalize();
+        let right = cgmath::Vector3::new(-sin_yaw, 0.0, cos_yaw).normalize();
+
         let step = self.speed * dt;
-
-        let forward = camera.target - camera.eye;
-        let forward_norm = forward.normalize();
-        let forward_mag = forward.magnitude();
-
-        if self.is_forward_pressed && forward_mag > step {
-            camera.eye += forward_norm * step;
+        if self.is_forward_pressed {
+            camera.position += forward * step;
         }
         if self.is_backward_pressed {
-            camera.eye -= forward_norm * step;
+            camera.position -= forward * step;
         }
-
-        let right = forward_norm.cross(camera.up);
-        let forward = camera.target - camera.eye;
-        let forward_mag = forward.magnitude();
-
         if self.is_right_pressed {
-            camera.eye = camera.target - (forward + right * step).normalize() * forward_mag;
+            camera.position += right * step;
         }
         if self.is_left_pressed {
-            camera.eye = camera.target - (forward - right * step).normalize() * forward_mag;
+            camera.position -= right * step;
+        }
+        if self.is_up_pressed {
+            camera.position.y += step;
+        }
+        if self.is_down_pressed {
+            camera.position.y -= step;
+        }
+
+        camera.yaw += cgmath::Rad(self.rotate_horizontal.to_radians() * self.sensitivity * dt);
+        camera.pitch += cgmath::Rad(-self.rotate_vertical.to_radians() * self.sensitivity * dt);
+
+        self.rotate_horizontal = 0.0;
+        self.rotate_vertical = 0.0;
+
+        if camera.pitch < -cgmath::Rad(SAFE_FRAC_PI_2) {
+            camera.pitch = -cgmath::Rad(SAFE_FRAC_PI_2);
+        } else if camera.pitch > cgmath::Rad(SAFE_FRAC_PI_2) {
+            camera.pitch = cgmath::Rad(SAFE_FRAC_PI_2);
         }
     }
 }
 
 pub struct CameraState {
     camera: Camera,
+    projection: Projection,
     uniform: CameraUniform,
     buffer: wgpu::Buffer,
     bind_group_layout: wgpu::BindGroupLayout,
@@ -130,17 +182,20 @@ impl CameraState {
         camera_config: &CameraConfig,
     ) -> Self {
         let camera = Camera {
-            eye: camera_config.eye.into(),
-            target: camera_config.target.into(),
-            up: cgmath::Vector3::unit_y(),
+            position: camera_config.position.into(),
+            yaw: cgmath::Deg(camera_config.yaw).into(),
+            pitch: cgmath::Deg(camera_config.pitch).into(),
+        };
+
+        let projection = Projection {
             aspect: config.width as f32 / config.height as f32,
-            fovy: camera_config.fovy,
+            fovy: cgmath::Deg(camera_config.fovy).into(),
             znear: camera_config.znear,
             zfar: camera_config.zfar,
         };
 
         let mut uniform = CameraUniform::new();
-        uniform.update_view_proj(&camera);
+        uniform.update_view_proj(&camera, &projection);
 
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Camera Buffer"),
@@ -173,11 +228,12 @@ impl CameraState {
 
         Self {
             camera,
+            projection,
             uniform,
             buffer,
             bind_group_layout,
             bind_group,
-            controller: CameraController::new(camera_config.speed),
+            controller: CameraController::new(camera_config.speed, camera_config.sensitivity),
         }
     }
 
@@ -190,16 +246,20 @@ impl CameraState {
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
-        self.camera.aspect = width as f32 / height as f32;
+        self.projection.resize(width, height);
     }
 
     pub fn set_move(&mut self, direction: CameraMove, is_pressed: bool) {
         self.controller.set_move(direction, is_pressed);
     }
 
+    pub fn set_look(&mut self, mouse_dx: f64, mouse_dy: f64) {
+        self.controller.set_look(mouse_dx, mouse_dy);
+    }
+
     pub fn update(&mut self, queue: &wgpu::Queue, dt: f32) {
         self.controller.update_camera(&mut self.camera, dt);
-        self.uniform.update_view_proj(&self.camera);
+        self.uniform.update_view_proj(&self.camera, &self.projection);
         queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&[self.uniform]));
     }
 }
@@ -219,13 +279,9 @@ mod tests {
 
     fn test_camera() -> Camera {
         Camera {
-            eye: (0.0, 0.0, 10.0).into(),
-            target: (0.0, 0.0, 0.0).into(),
-            up: cgmath::Vector3::unit_y(),
-            aspect: 1.0,
-            fovy: 45.0,
-            znear: 0.1,
-            zfar: 100.0,
+            position: (0.0, 0.0, 10.0).into(),
+            yaw: cgmath::Deg(-90.0).into(),
+            pitch: cgmath::Deg(0.0).into(),
         }
     }
 
@@ -251,92 +307,77 @@ mod tests {
     }
 
     #[test]
-    fn forward_moves_the_eye_towards_the_target_by_speed_times_dt() {
+    fn forward_moves_the_eye_towards_the_look_direction_by_speed_times_dt() {
         let mut camera = test_camera();
-        let mut controller = CameraController::new(2.0);
+        let mut controller = CameraController::new(2.0, 0.4);
         controller.set_move(CameraMove::Forward, true);
 
         controller.update_camera(&mut camera, 0.5);
 
-        assert_close(camera.eye.z, 9.0, "eye z after forward");
-        assert_close(camera.eye.x, 0.0, "eye x is unchanged");
-        assert_close(camera.eye.y, 0.0, "eye y is unchanged");
+        // Yaw -90deg faces -z.
+        assert_close(camera.position.z, 9.0, "position z after forward");
+        assert_close(camera.position.x, 0.0, "position x is unchanged");
+        assert_close(camera.position.y, 0.0, "position y is unchanged");
     }
 
     #[test]
-    fn backward_moves_the_eye_away_from_the_target() {
+    fn backward_moves_the_eye_away_from_the_look_direction() {
         let mut camera = test_camera();
-        let mut controller = CameraController::new(2.0);
+        let mut controller = CameraController::new(2.0, 0.4);
         controller.set_move(CameraMove::Backward, true);
 
         controller.update_camera(&mut camera, 0.5);
 
-        assert_close(camera.eye.z, 11.0, "eye z after backward");
-    }
-
-    #[test]
-    fn forward_does_not_move_past_the_target() {
-        let mut camera = test_camera();
-        let mut controller = CameraController::new(2.0);
-        controller.set_move(CameraMove::Forward, true);
-
-        controller.update_camera(&mut camera, 20.0);
-
-        assert_close(camera.eye.z, 10.0, "eye is left where it was");
-        assert!(
-            camera.eye.z > camera.target.z,
-            "eye must not cross the target"
-        );
+        assert_close(camera.position.z, 11.0, "position z after backward");
     }
 
     #[test]
     fn releasing_a_direction_stops_the_movement() {
         let mut camera = test_camera();
-        let mut controller = CameraController::new(2.0);
+        let mut controller = CameraController::new(2.0, 0.4);
 
         controller.set_move(CameraMove::Forward, true);
         controller.update_camera(&mut camera, 0.5);
-        let moved_to = camera.eye;
+        let moved_to = camera.position;
 
         controller.set_move(CameraMove::Forward, false);
         controller.update_camera(&mut camera, 0.5);
 
-        assert_close(camera.eye.z, moved_to.z, "eye z after release");
+        assert_close(camera.position.z, moved_to.z, "position z after release");
     }
 
     #[test]
     fn forward_and_backward_held_together_cancel_out() {
         let mut camera = test_camera();
-        let mut controller = CameraController::new(2.0);
+        let mut controller = CameraController::new(2.0, 0.4);
         controller.set_move(CameraMove::Forward, true);
         controller.set_move(CameraMove::Backward, true);
 
         controller.update_camera(&mut camera, 0.5);
 
-        assert_close(camera.eye.z, 10.0, "eye z is unchanged");
+        assert_close(camera.position.z, 10.0, "position z is unchanged");
     }
 
     #[test]
-    fn strafing_keeps_the_eye_at_the_same_distance_from_the_target() {
+    fn strafing_moves_perpendicular_to_the_look_direction() {
         let mut camera = test_camera();
-        let start_distance = (camera.eye - camera.target).magnitude();
-        let mut controller = CameraController::new(2.0);
+        let mut controller = CameraController::new(2.0, 0.4);
         controller.set_move(CameraMove::Right, true);
 
         controller.update_camera(&mut camera, 0.5);
 
-        let distance = (camera.eye - camera.target).magnitude();
-        assert_close(distance, start_distance, "orbit radius");
+        // Facing -z, right strafe moves along +x.
+        assert_close(camera.position.z, 10.0, "position z is unchanged");
         assert!(
-            camera.eye.x < 0.0,
-            "right strafe moves the eye to -x, got {}",
-            camera.eye.x
+            camera.position.x > 0.0,
+            "right strafe moves the eye to +x, got {}",
+            camera.position.x
         );
     }
 
     #[test]
     fn left_and_right_strafes_are_mirror_images() {
-        let mut controller = CameraController::new(2.0);
+        let mut controller = CameraController::new(2.0, 0.4);
 
         let mut right = test_camera();
         controller.set_move(CameraMove::Right, true);
@@ -347,21 +388,62 @@ mod tests {
         controller.set_move(CameraMove::Left, true);
         controller.update_camera(&mut left, 0.5);
 
-        assert_close(left.eye.x, -right.eye.x, "mirrored x");
-        assert_close(left.eye.z, right.eye.z, "matching z");
+        assert_close(left.position.x, -right.position.x, "mirrored x");
+        assert_close(left.position.z, right.position.z, "matching z");
     }
 
     #[test]
     fn a_zero_delta_time_leaves_the_camera_alone() {
         let mut camera = test_camera();
-        let mut controller = CameraController::new(2.0);
+        let mut controller = CameraController::new(2.0, 0.4);
         controller.set_move(CameraMove::Forward, true);
         controller.set_move(CameraMove::Right, true);
 
         controller.update_camera(&mut camera, 0.0);
 
-        assert_close(camera.eye.x, 0.0, "eye x");
-        assert_close(camera.eye.y, 0.0, "eye y");
-        assert_close(camera.eye.z, 10.0, "eye z");
+        assert_close(camera.position.x, 0.0, "position x");
+        assert_close(camera.position.y, 0.0, "position y");
+        assert_close(camera.position.z, 10.0, "position z");
+    }
+
+    #[test]
+    fn up_and_down_move_along_the_world_y_axis() {
+        let mut camera = test_camera();
+        let mut controller = CameraController::new(2.0, 0.4);
+        controller.set_move(CameraMove::Up, true);
+
+        controller.update_camera(&mut camera, 0.5);
+
+        assert_close(camera.position.y, 1.0, "position y after up");
+    }
+
+    #[test]
+    fn mouse_motion_rotates_yaw_and_pitch_then_resets() {
+        let mut camera = test_camera();
+        let mut controller = CameraController::new(2.0, 1.0);
+        controller.set_look(10.0, 5.0);
+
+        let yaw_before = camera.yaw;
+        let pitch_before = camera.pitch;
+        controller.update_camera(&mut camera, 1.0);
+
+        assert!(camera.yaw.0 > yaw_before.0, "positive dx increases yaw");
+        assert!(
+            camera.pitch.0 < pitch_before.0,
+            "positive dy (mouse moving down) decreases pitch"
+        );
+        assert_close(controller.rotate_horizontal, 0.0, "horizontal resets");
+        assert_close(controller.rotate_vertical, 0.0, "vertical resets");
+    }
+
+    #[test]
+    fn pitch_is_clamped_to_avoid_gimbal_flip() {
+        let mut camera = test_camera();
+        let mut controller = CameraController::new(2.0, 1.0);
+        controller.set_look(0.0, -100000.0);
+
+        controller.update_camera(&mut camera, 1.0);
+
+        assert!(camera.pitch.0 <= SAFE_FRAC_PI_2, "pitch clamped at the top");
     }
 }

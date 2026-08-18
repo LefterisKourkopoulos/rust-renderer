@@ -128,6 +128,10 @@ impl Scene {
         self.camera.set_move(direction, is_pressed);
     }
 
+    pub fn set_camera_look(&mut self, dx: f64, dy: f64) {
+        self.camera.set_look(dx, dy);
+    }
+
     pub fn resize(&mut self, width: u32, height: u32) {
         self.camera.resize(width, height);
     }

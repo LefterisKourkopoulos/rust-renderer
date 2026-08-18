@@ -2,6 +2,7 @@ pub mod context;
 pub mod pipeline;
 pub mod texture;
 pub mod vertex;
+pub mod hdr;
 
 pub use context::GpuContext;
 pub use pipeline::{RenderPipelineConfig, create_render_pipeline};

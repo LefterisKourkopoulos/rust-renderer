@@ -4,7 +4,7 @@ use wgpu::Operations;
 pub struct HdrPipeline {
     pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
-    texture: texture::Texture,
+    // texture: texture::Texture,
     width: u32,
     height: u32,
     format: wgpu::TextureFormat,
@@ -12,7 +12,7 @@ pub struct HdrPipeline {
 }
 
 impl HdrPipeline {
-    pub fn new (device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) -> Self {
+    // pub fn new (device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) -> Self {
         
-    }
+    // }
 }

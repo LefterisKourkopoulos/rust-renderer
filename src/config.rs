@@ -17,22 +17,26 @@ impl Default for RendererConfig {
 
 pub struct CameraConfig {
     pub speed: f32,
+    pub sensitivity: f32,
     pub fovy: f32,
     pub znear: f32,
     pub zfar: f32,
-    pub eye: [f32; 3],
-    pub target: [f32; 3],
+    pub position: [f32; 3],
+    pub yaw: f32,
+    pub pitch: f32,
 }
 
 impl Default for CameraConfig {
     fn default() -> Self {
         Self {
             speed: 12.0,
+            sensitivity: 1.0,
             fovy: 45.0,
             znear: 0.1,
             zfar: 100.0,
-            eye: [5.0, 5.0, 5.0],
-            target: [0.0, 0.0, 0.0],
+            position: [5.0, 5.0, 5.0],
+            yaw: -135.0,
+            pitch: -35.264389,
         }
     }
 }

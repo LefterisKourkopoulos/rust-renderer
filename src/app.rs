@@ -6,7 +6,7 @@ use winit::{
     event::*,
     event_loop::{ActiveEventLoop, EventLoop},
     keyboard::{KeyCode, PhysicalKey},
-    window::Window,
+    window::{CursorGrabMode, Window},
 };
 
 use crate::config::{RendererConfig, SceneConfig};
@@ -25,7 +25,7 @@ use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use winit::platform::web::EventLoopExtWebSys;
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub enum Action {
     Exit,
     CycleDiffuse,
@@ -33,6 +33,10 @@ pub enum Action {
     MoveCamera {
         direction: CameraMove,
         is_pressed: bool,
+    },
+    LookCamera {
+        dx: f64,
+        dy: f64,
     },
 }
 
@@ -46,12 +50,14 @@ fn action_for_key(key_code: KeyCode, is_pressed: bool) -> Option<Action> {
 
     match key_code {
         KeyCode::Escape if is_pressed => Some(Action::Exit),
-        KeyCode::Space if is_pressed => Some(Action::CycleDiffuse),
+        KeyCode::KeyC if is_pressed => Some(Action::CycleDiffuse),
         KeyCode::KeyF if is_pressed => Some(Action::ToggleDepthDebug),
         KeyCode::KeyW | KeyCode::ArrowUp => movement(CameraMove::Forward),
         KeyCode::KeyS | KeyCode::ArrowDown => movement(CameraMove::Backward),
         KeyCode::KeyA | KeyCode::ArrowLeft => movement(CameraMove::Left),
         KeyCode::KeyD | KeyCode::ArrowRight => movement(CameraMove::Right),
+        KeyCode::KeyE => movement(CameraMove::Up),
+        KeyCode::KeyQ => movement(CameraMove::Down),
         _ => None,
     }
 }
@@ -98,6 +104,7 @@ impl Engine {
                 direction,
                 is_pressed,
             } => self.scene.set_camera_move(direction, is_pressed),
+            Action::LookCamera { dx, dy } => self.scene.set_camera_look(dx, dy),
         }
     }
 
@@ -163,6 +170,7 @@ impl ApplicationHandler<Engine> for App {
 
         #[cfg(not(target_arch = "wasm32"))]
         {
+            grab_cursor(&window);
             self.engine = Some(pollster::block_on(Engine::new(window)).unwrap());
         }
 
@@ -238,6 +246,28 @@ impl ApplicationHandler<Engine> for App {
             },
             _ => {}
         }
+    }
+
+    fn device_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        _device_id: winit::event::DeviceId,
+        event: DeviceEvent,
+    ) {
+        if let DeviceEvent::MouseMotion { delta: (dx, dy) } = event {
+            self.pending_actions.push(Action::LookCamera { dx, dy });
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn grab_cursor(window: &Window) {
+    if window
+        .set_cursor_grab(CursorGrabMode::Locked)
+        .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))
+        .is_ok()
+    {
+        window.set_cursor_visible(false);
     }
 }
 
