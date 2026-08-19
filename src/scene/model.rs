@@ -1,5 +1,7 @@
 use std::ops::Range;
 
+use super::instance::Instance;
+use super::light::Light;
 use crate::gfx::{Texture, Vertex};
 
 #[repr(C)]
@@ -52,6 +54,42 @@ impl Vertex for ModelVertex {
 pub struct Model {
     pub meshes: Vec<Mesh>,
     pub materials: Vec<Material>,
+    pub instances: Vec<Instance>,
+    pub lights: Vec<Light>,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct MaterialUniform {
+    pub base_color: [f32; 4],
+    pub emissive: [f32; 3],
+    pub metallic: f32,
+    pub roughness: f32,
+    pub _padding: [f32; 3],
+}
+
+impl Default for MaterialUniform {
+    fn default() -> Self {
+        Self {
+            base_color: [1.0, 1.0, 1.0, 1.0],
+            emissive: [0.0, 0.0, 0.0],
+            metallic: 0.0,
+            roughness: 1.0,
+            _padding: [0.0; 3],
+        }
+    }
+}
+
+impl MaterialUniform {
+    pub fn buffer(&self, device: &wgpu::Device, label: &str) -> wgpu::Buffer {
+        use wgpu::util::DeviceExt;
+
+        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(&format!("{label} Material Uniform")),
+            contents: bytemuck::bytes_of(self),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        })
+    }
 }
 
 pub struct Material {
@@ -60,6 +98,8 @@ pub struct Material {
     pub diffuse_texture: Texture,
     #[allow(dead_code)]
     pub normal_texture: Texture,
+    #[allow(dead_code)]
+    pub uniform_buffer: wgpu::Buffer,
     pub bind_group: wgpu::BindGroup,
 }
 
@@ -69,6 +109,7 @@ pub struct Mesh {
     pub index_buffer: wgpu::Buffer,
     pub num_elements: u32,
     pub material: usize,
+    pub instances: Option<Range<u32>>,
 }
 
 pub trait DrawModel<'a> {
@@ -158,14 +199,36 @@ where
     ) {
         for mesh in &model.meshes {
             let material = &model.materials[mesh.material];
+            let range = mesh.instances.clone().unwrap_or_else(|| instances.clone());
             self.draw_mesh_instanced(
                 mesh,
                 material,
-                instances.clone(),
+                range,
                 camera_bind_group,
                 diffuse_override,
                 light_bind_group
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod material_uniform_tests {
+    use super::MaterialUniform;
+
+    #[test]
+    fn matches_the_shader_struct_layout() {
+        assert_eq!(std::mem::size_of::<MaterialUniform>(), 48, "struct size");
+        assert_eq!(std::mem::offset_of!(MaterialUniform, base_color), 0);
+        assert_eq!(std::mem::offset_of!(MaterialUniform, emissive), 16);
+        assert_eq!(std::mem::offset_of!(MaterialUniform, metallic), 28);
+        assert_eq!(std::mem::offset_of!(MaterialUniform, roughness), 32);
+    }
+
+    #[test]
+    fn the_default_is_a_neutral_multiplier() {
+        let default = MaterialUniform::default();
+        assert_eq!(default.base_color, [1.0; 4]);
+        assert_eq!(default.emissive, [0.0; 3]);
     }
 }

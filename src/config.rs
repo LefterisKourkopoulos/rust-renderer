@@ -50,6 +50,18 @@ impl Default for CameraConfig {
     }
 }
 
+impl CameraConfig {
+    pub fn close_up() -> Self {
+        Self {
+            speed: 2.0,
+            znear: 0.05,
+            position: [2.5, 2.0, 2.5],
+            pitch: -20.0,
+            ..Self::default()
+        }
+    }
+}
+
 pub struct InstanceGridConfig {
     pub instances_per_row: u32,
     pub space_between: f32,
@@ -68,14 +80,16 @@ pub struct SceneConfig {
     pub camera: CameraConfig,
     pub grid: InstanceGridConfig,
     pub model_file: &'static str,
+    pub light_intensity_scale: f32,
 }
 
 impl Default for SceneConfig {
     fn default() -> Self {
         Self {
-            camera: CameraConfig::default(),
+            camera: CameraConfig::close_up(),
             grid: InstanceGridConfig::default(),
-            model_file: "cube.obj",
+            model_file: "cube_diorama.glb",
+            light_intensity_scale: 0.005,
         }
     }
 }

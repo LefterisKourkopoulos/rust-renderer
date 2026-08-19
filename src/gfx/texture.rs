@@ -1,6 +1,7 @@
 use anyhow::Result;
 use image::GenericImageView;
 
+#[derive(Clone)]
 pub struct Texture {
     #[allow(unused)]
     pub texture: wgpu::Texture,
@@ -106,6 +107,16 @@ impl Texture {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
             label: Some(label),
         })
@@ -116,6 +127,7 @@ impl Texture {
         layout: &wgpu::BindGroupLayout,
         diffuse: &Texture,
         normal: &Texture,
+        uniform_buffer: &wgpu::Buffer,
         label: &str,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -137,6 +149,10 @@ impl Texture {
                     binding: 3,
                     resource: wgpu::BindingResource::Sampler(&normal.sampler),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
             ],
             label: Some(label),
         })
@@ -153,8 +169,6 @@ impl Texture {
         Self::from_image(device, queue, &img, Some(label), is_normal_map)
     }
 
-    /// A 1x1 texture, useful as a default normal map (flat "up", i.e. [128, 128, 255, 255])
-    /// for materials that don't provide one.
     pub fn from_color(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -162,80 +176,54 @@ impl Texture {
         is_normal_map: bool,
         label: &str,
     ) -> Self {
-        let size = wgpu::Extent3d {
-            width: 1,
-            height: 1,
-            depth_or_array_layers: 1,
-        };
-        let format = if is_normal_map {
-            wgpu::TextureFormat::Rgba8Unorm
-        } else {
-            wgpu::TextureFormat::Rgba8UnormSrgb
-        };
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some(label),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                aspect: wgpu::TextureAspect::All,
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-            },
+        Self::from_rgba8(
+            device,
+            queue,
             &color,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(4),
-                rows_per_image: Some(1),
-            },
-            size,
-        );
-
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
-            ..Default::default()
-        });
-
-        Self {
-            texture,
-            view,
-            sampler,
-        }
+            1,
+            1,
+            !is_normal_map,
+            wgpu::AddressMode::ClampToEdge,
+            Some(label),
+        )
+        .expect("a single RGBA pixel is always a valid 1x1 texture")
     }
 
-    pub fn from_image(
+    pub fn from_rgba8(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        img: &image::DynamicImage,
+        pixels: &[u8],
+        width: u32,
+        height: u32,
+        srgb: bool,
+        address_mode: wgpu::AddressMode,
         label: Option<&str>,
-        is_normal_map: bool,
     ) -> Result<Self> {
-        let rgba = img.to_rgba8();
-        let dimensions = img.dimensions();
+        if width == 0 || height == 0 {
+            anyhow::bail!(
+                "texture {} has a zero dimension ({width}x{height})",
+                label.unwrap_or("<unlabelled>")
+            );
+        }
 
-        let format = if is_normal_map {
-            wgpu::TextureFormat::Rgba8Unorm
-        } else {
+        let expected = 4 * width as usize * height as usize;
+        if pixels.len() != expected {
+            anyhow::bail!(
+                "texture {} is {width}x{height} so it needs {expected} bytes of RGBA8, got {}",
+                label.unwrap_or("<unlabelled>"),
+                pixels.len()
+            );
+        }
+
+        let format = if srgb {
             wgpu::TextureFormat::Rgba8UnormSrgb
+        } else {
+            wgpu::TextureFormat::Rgba8Unorm
         };
 
         let size = wgpu::Extent3d {
-            width: dimensions.0,
-            height: dimensions.1,
+            width,
+            height,
             depth_or_array_layers: 1,
         };
         let texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -256,22 +244,22 @@ impl Texture {
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
             },
-            &rgba,
+            pixels,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(4 * dimensions.0),
-                rows_per_image: Some(dimensions.1),
+                bytes_per_row: Some(4 * width),
+                rows_per_image: Some(height),
             },
             size,
         );
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            address_mode_u: address_mode,
+            address_mode_v: address_mode,
+            address_mode_w: address_mode,
             mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Linear,
             mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             ..Default::default()
         });
@@ -281,6 +269,28 @@ impl Texture {
             view,
             sampler,
         })
+    }
+
+    pub fn from_image(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        img: &image::DynamicImage,
+        label: Option<&str>,
+        is_normal_map: bool,
+    ) -> Result<Self> {
+        let rgba = img.to_rgba8();
+        let (width, height) = img.dimensions();
+
+        Self::from_rgba8(
+            device,
+            queue,
+            &rgba,
+            width,
+            height,
+            !is_normal_map,
+            wgpu::AddressMode::ClampToEdge,
+            label,
+        )
     }
 
     pub fn create_2d_texture(

@@ -62,26 +62,61 @@ fn model_vertex_attributes_exactly_cover_the_stride() {
 }
 
 #[test]
-fn instance_raw_layout_is_four_consecutive_vec4_columns() {
+fn instance_raw_layout_is_a_mat4_then_a_normal_mat3() {
     let desc = InstanceRaw::desc();
 
-    assert_eq!(size_of::<InstanceRaw>(), 64, "a mat4x4 of f32");
+    assert_eq!(
+        size_of::<InstanceRaw>(),
+        100,
+        "a mat4x4 model matrix plus a mat3x3 normal matrix"
+    );
     assert_eq!(
         desc.array_stride,
         size_of::<InstanceRaw>() as wgpu::BufferAddress
     );
     assert_eq!(desc.step_mode, wgpu::VertexStepMode::Instance);
 
-    let expected = [(0, 5), (16, 6), (32, 7), (48, 8)];
+    let expected = [
+        (0, 5, wgpu::VertexFormat::Float32x4),
+        (16, 6, wgpu::VertexFormat::Float32x4),
+        (32, 7, wgpu::VertexFormat::Float32x4),
+        (48, 8, wgpu::VertexFormat::Float32x4),
+        (64, 9, wgpu::VertexFormat::Float32x3),
+        (76, 10, wgpu::VertexFormat::Float32x3),
+        (88, 11, wgpu::VertexFormat::Float32x3),
+    ];
 
     assert_eq!(desc.attributes.len(), expected.len());
-    for (attribute, (offset, location)) in desc.attributes.iter().zip(expected) {
+    for (attribute, (offset, location, format)) in desc.attributes.iter().zip(expected) {
         assert_eq!(
             attribute.offset, offset,
             "offset of shader location {location}"
         );
         assert_eq!(attribute.shader_location, location);
-        assert_eq!(attribute.format, wgpu::VertexFormat::Float32x4);
+        assert_eq!(
+            attribute.format, format,
+            "format of shader location {location}"
+        );
+    }
+}
+
+#[test]
+fn instance_raw_attributes_exactly_cover_the_stride() {
+    let desc = InstanceRaw::desc();
+
+    let last = desc.attributes.last().expect("layout has attributes");
+    assert_eq!(
+        last.offset + last.format.size(),
+        desc.array_stride,
+        "no padding or overlap between the final attribute and the stride"
+    );
+
+    for pair in desc.attributes.windows(2) {
+        assert_eq!(
+            pair[0].offset + pair[0].format.size(),
+            pair[1].offset,
+            "attributes must be packed back to back"
+        );
     }
 }
 

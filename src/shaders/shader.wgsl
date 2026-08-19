@@ -9,9 +9,19 @@ struct CameraUniform {
 @group(1) @binding(0) // 1.
 var<uniform> camera: CameraUniform;
 
+const LIGHT_DIRECTIONAL: u32 = 0u;
+const LIGHT_POINT: u32 = 1u;
+const LIGHT_SPOT: u32 = 2u;
+
 struct Light {
     position: vec3<f32>,
+    kind: u32,
     color: vec3<f32>,
+    intensity: f32,
+    direction: vec3<f32>,
+    range: f32,
+    cos_inner: f32,
+    cos_outer: f32,
 }
 @group(2) @binding(0)
 var<storage, read> lights: array<Light>;
@@ -38,6 +48,9 @@ struct InstanceInput {
     @location(6) model_matrix_1: vec4<f32>,
     @location(7) model_matrix_2: vec4<f32>,
     @location(8) model_matrix_3: vec4<f32>,
+    @location(9) normal_matrix_0: vec3<f32>,
+    @location(10) normal_matrix_1: vec3<f32>,
+    @location(11) normal_matrix_2: vec3<f32>,
 };
 
 @vertex
@@ -53,9 +66,9 @@ fn vs_main(
     );
 
     let normal_matrix = mat3x3<f32>(
-        model_matrix[0].xyz,
-        model_matrix[1].xyz,
-        model_matrix[2].xyz,
+        instance.normal_matrix_0,
+        instance.normal_matrix_1,
+        instance.normal_matrix_2,
     );
 
     let world_position = (model_matrix * vec4<f32>(model.position, 1.0)).xyz;
@@ -80,9 +93,18 @@ var t_normal: texture_2d<f32>;
 @group(0) @binding(3)
 var s_normal: sampler;
 
+struct MaterialUniform {
+    base_color: vec4<f32>,
+    emissive: vec3<f32>,
+    metallic: f32,
+    roughness: f32,
+};
+@group(0) @binding(4)
+var<uniform> material: MaterialUniform;
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let object_color = textureSample(t_diffuse, s_diffuse, in.tex_coords);
+    let object_color = textureSample(t_diffuse, s_diffuse, in.tex_coords) * material.base_color;
     let object_normal = textureSample(t_normal, s_normal, in.tex_coords);
 
     let tangent_matrix = mat3x3<f32>(
@@ -94,24 +116,58 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let view_dir = normalize(camera.view_pos.xyz - in.world_position);
 
-    let ambient_strength = 0.1;
+    let shininess = mix(4.0, 256.0, 1.0 - material.roughness);
+
     var result = vec3<f32>(0.0);
 
     for (var i = 0u; i < arrayLength(&lights); i++) {
         let light = lights[i];
 
-        let ambient_color = light.color * ambient_strength;
+        var light_dir: vec3<f32>;
+        var attenuation = 1.0;
 
-        let light_dir = normalize(light.position - in.world_position);
+        if light.kind == LIGHT_DIRECTIONAL {
+            light_dir = -light.direction;
+        } else {
+            let to_light = light.position - in.world_position;
+            let distance = length(to_light);
+            if distance < 1e-4 {
+                continue;
+            }
+            light_dir = to_light / distance;
+
+            attenuation = 1.0 / (distance * distance);
+
+            if light.range > 0.0 {
+                let fade = clamp(1.0 - distance / light.range, 0.0, 1.0);
+                attenuation *= fade * fade;
+            }
+
+            if light.kind == LIGHT_SPOT {
+                let cos_angle = dot(light.direction, -light_dir);
+                attenuation *= smoothstep(light.cos_outer, light.cos_inner, cos_angle);
+            }
+        }
+
+        let radiance = light.color * light.intensity * attenuation;
+
         let diffuse_strength = max(dot(world_normal, light_dir), 0.0);
-        let diffuse_color = light.color * diffuse_strength;
+        let diffuse_color = radiance * diffuse_strength;
 
         let half_dir = normalize(view_dir + light_dir);
-        let specular_strength = pow(max(dot(world_normal, half_dir), 0.0), 32.0);
-        let specular_color = specular_strength * light.color;
+        let specular_strength = select(
+            0.0,
+            pow(max(dot(world_normal, half_dir), 0.0), shininess),
+            diffuse_strength > 0.0,
+        );
+        let specular_color = specular_strength * radiance;
 
-        result += (ambient_color + diffuse_color + specular_color) * object_color.xyz;
+        result += (diffuse_color + specular_color) * object_color.xyz;
     }
+
+    let ambient_strength = 0.1;
+    result += ambient_strength * object_color.xyz;
+    result += material.emissive;
 
     return vec4<f32>(result, object_color.a);
 }

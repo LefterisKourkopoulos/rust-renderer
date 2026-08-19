@@ -33,22 +33,13 @@ struct DiffuseOverride {
     texture: Texture,
     #[allow(dead_code)]
     normal_texture: Texture,
+    #[allow(dead_code)]
+    uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
 }
 
 impl Scene {
     pub async fn new(ctx: &GpuContext, config: &SceneConfig) -> anyhow::Result<Self> {
-        // Instances
-        let instances = Instance::grid(&config.grid);
-        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
-        let instance_buffer = ctx
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Instance Buffer"),
-                contents: bytemuck::cast_slice(&instance_data),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-
         // Textures
         let texture_bind_group_layout =
             Texture::material_bind_group_layout(&ctx.device, "texture_bind_group_layout");
@@ -65,16 +56,20 @@ impl Scene {
                 true,
                 "diffuse_override_default_normal",
             );
+            let uniform_buffer =
+                model::MaterialUniform::default().buffer(&ctx.device, "diffuse_override");
             let bind_group = Texture::material_bind_group(
                 &ctx.device,
                 &texture_bind_group_layout,
                 &texture,
                 &normal_texture,
+                &uniform_buffer,
                 "diffuse_override_bind_group",
             );
             diffuse_overrides.push(DiffuseOverride {
                 texture,
                 normal_texture,
+                uniform_buffer,
                 bind_group,
             });
         }
@@ -91,16 +86,43 @@ impl Scene {
         )
         .await?;
 
-        // Lights
-        let lights = LightCollection::new(
-            &ctx.device,
-            vec![
-                Light::new([2.0, 2.0, 2.0], [1.0, 0.0, 0.0]),
-                Light::new([-2.0, 2.0, 2.0], [0.0, 1.0, 0.0]),
-                Light::new([2.0, 2.0, -2.0], [0.0, 0.0, 1.0]),
-                Light::new([-2.0, 2.0, -2.0], [1.0, 1.0, 1.0]),
-            ],
-        );
+        let instances = if obj_model.instances.is_empty() {
+            Instance::grid(&config.grid)
+        } else {
+            obj_model.instances.clone()
+        };
+        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
+        let instance_buffer = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Instance Buffer"),
+                contents: bytemuck::cast_slice(&instance_data),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+
+        let (lights, animate) = if obj_model.lights.is_empty() {
+            let fallback = vec![
+                // Intensity 20 compensates for the inverse square falloff the shader now applies:
+                // at the grid's 3-4 unit light distance that costs roughly a factor of 12, so this
+                // keeps the demo grid about as bright as it was before attenuation existed.
+                Light::new([2.0, 2.0, 2.0], [1.0, 0.0, 0.0]).with_intensity(20.0),
+                Light::new([-2.0, 2.0, 2.0], [0.0, 1.0, 0.0]).with_intensity(20.0),
+                Light::new([2.0, 2.0, -2.0], [0.0, 0.0, 1.0]).with_intensity(20.0),
+                Light::new([-2.0, 2.0, -2.0], [1.0, 1.0, 1.0]).with_intensity(20.0),
+            ];
+            (fallback, true)
+        } else {
+            let scaled = obj_model
+                .lights
+                .iter()
+                .map(|light| Light {
+                    intensity: light.intensity * config.light_intensity_scale,
+                    ..*light
+                })
+                .collect();
+            (scaled, false)
+        };
+        let lights = LightCollection::new(&ctx.device, lights, animate);
 
         // Skybox
         let hdr_loader = HdrLoader::new(&ctx.device);

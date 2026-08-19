@@ -17,6 +17,7 @@ pollster = "1.0"
 wgpu = "30.0"
 bytemuck = { version = "1.24", features = [ "derive" ] }
 tobj = { version = "3.2", default-features = false, features = ["async"]}
+gltf = { version = "1.4", default-features = false, features = ["import", "utils", "names", "KHR_lights_punctual", "KHR_materials_emissive_strength"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 console_error_panic_hook = "0.1.6"
