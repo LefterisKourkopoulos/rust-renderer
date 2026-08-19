@@ -24,8 +24,6 @@ fn every_embedded_image_decodes_to_real_pixels() {
             "{name} decoded to the wrong number of bytes for {width}x{height}"
         );
 
-        // A uniform buffer is what a truncated file that still parses tends to produce, and it is
-        // indistinguishable from a working texture until you look at the screen.
         let first = rgba.as_raw()[0];
         assert!(
             rgba.as_raw().iter().any(|&byte| byte != first),
@@ -36,7 +34,6 @@ fn every_embedded_image_decodes_to_real_pixels() {
 
 #[test]
 fn the_image_list_covers_every_embedded_image() {
-    // Otherwise a newly embedded texture silently escapes the check above.
     for name in IMAGES {
         assert!(
             rust_renderer::assets::load_binary(name).is_ok(),

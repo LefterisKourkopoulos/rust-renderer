@@ -1,9 +1,3 @@
-//! Builds the scene render pipeline on a real device, which is what catches a mismatch between
-//! `shader.wgsl` and the Rust-side vertex layouts and bind group layouts. The pure-layout
-//! assertions in `vertex_layout.rs` cannot see the shader at all.
-//!
-//! Skips itself when no GPU adapter is available so it stays usable in a headless CI.
-
 use rust_renderer::Vertex;
 use rust_renderer::scene::instance::InstanceRaw;
 use rust_renderer::scene::model::ModelVertex;
@@ -35,7 +29,6 @@ fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
     }))
     .ok()?;
 
-    // Turn any validation error into a panic instead of a log line the test would never see.
     device.on_uncaptured_error(std::sync::Arc::new(|error| {
         panic!("wgpu validation error: {error}");
     }));

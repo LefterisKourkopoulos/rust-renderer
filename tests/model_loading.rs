@@ -1,11 +1,3 @@
-//! Loads the real assets on a real device, through the same `load_model` dispatch the app uses.
-//!
-//! The unit tests in `gltf_loader` parse the glTF document but never touch the GPU, so they cannot
-//! catch a bad texture upload, a bind group that does not match its layout, or an instance range
-//! that points past the end of the instance buffer. This does.
-//!
-//! Skips itself when no GPU adapter is available so it stays usable in a headless CI.
-
 use rust_renderer::Texture;
 use rust_renderer::assets;
 
@@ -35,7 +27,6 @@ fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
     }))
     .ok()?;
 
-    // Turn any validation error into a panic instead of a log line the test would never see.
     device.on_uncaptured_error(std::sync::Arc::new(|error| {
         panic!("wgpu validation error: {error}");
     }));
@@ -68,9 +59,7 @@ fn the_diorama_loads_with_geometry_materials_and_instances() {
     ))
     .expect("the diorama loads");
 
-    // 93 primitives across 50 meshes, all triangles, so none should be skipped.
     assert_eq!(model.meshes.len(), 93, "one mesh per glTF primitive");
-    // 47 file materials plus the appended default.
     assert_eq!(model.materials.len(), 48);
     assert!(!model.instances.is_empty(), "node transforms place the meshes");
 
@@ -89,8 +78,6 @@ fn the_diorama_loads_with_geometry_materials_and_instances() {
             model.materials.len()
         );
 
-        // An out-of-range instance range is a GPU read past the end of the instance buffer, which
-        // is exactly the sort of thing that renders as garbage rather than failing loudly.
         let range = mesh
             .instances
             .clone()
@@ -113,10 +100,6 @@ fn the_diorama_loads_with_geometry_materials_and_instances() {
 
 #[test]
 fn base_colour_maps_decode_as_srgb_and_normal_maps_stay_linear() {
-    // Three of the diorama's images (0, 2 and 3) are used as a base colour map by one material and
-    // as a normal map by another. Caching them by image index alone would hand the second material
-    // whichever format the first one asked for, which either washes out the albedo or bends every
-    // normal. Checking the uploaded formats is the only way to see that from outside the loader.
     let Some((device, queue)) = device() else {
         eprintln!("no GPU adapter available; skipping");
         return;
@@ -154,8 +137,6 @@ fn base_colour_maps_decode_as_srgb_and_normal_maps_stay_linear() {
 
 #[test]
 fn tiling_textures_keep_the_repeat_wrapping_the_file_asks_for() {
-    // The diorama's samplers specify REPEAT. Clamping instead smears the edge texel across the
-    // whole surface, which reads as a plausible-looking flat colour rather than as a failure.
     let bytes = assets::load_binary("cube_diorama.glb").expect("the diorama is embedded");
     let (document, _, _) = gltf::import_slice(bytes).expect("the diorama parses");
 
@@ -176,8 +157,6 @@ fn tiling_textures_keep_the_repeat_wrapping_the_file_asks_for() {
 
 #[test]
 fn the_diorama_geometry_is_finite_and_roughly_room_sized() {
-    // Guards the transform composition against silently producing NaN or an absurd scale, either of
-    // which puts the model somewhere the camera will never find it.
     let bytes = assets::load_binary("cube_diorama.glb").expect("the diorama is embedded");
     let (document, buffers, _) = gltf::import_slice(bytes).expect("the diorama parses");
 
@@ -222,8 +201,6 @@ fn the_obj_path_still_defers_its_instancing_to_the_scene() {
     let model =
         pollster::block_on(assets::load_model("cube.obj", &device, &queue, &layout)).expect("cube.obj loads");
 
-    // An empty instance list is the signal for `Scene` to substitute the 10x10 demo grid, and
-    // `instances: None` per mesh is what makes each mesh draw across all of it.
     assert!(
         model.instances.is_empty(),
         "OBJ carries no scene graph, so it must not claim instances"
