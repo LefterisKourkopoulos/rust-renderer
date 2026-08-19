@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
 pub enum PipelineMode {
     #[default]
@@ -28,7 +30,7 @@ impl Default for RendererConfig {
 
 pub const MAX_CASCADES: usize = 4;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ShadowConfig {
     pub enabled: bool,
     pub cascade_count: usize,
@@ -70,6 +72,7 @@ impl ShadowConfig {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct SunConfig {
     pub direction: [f32; 3],
     pub color: [f32; 3],
@@ -86,6 +89,7 @@ impl Default for SunConfig {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct CameraConfig {
     pub speed: f32,
     pub sensitivity: f32,
@@ -124,6 +128,7 @@ impl CameraConfig {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct InstanceGridConfig {
     pub instances_per_row: u32,
     pub space_between: f32,
@@ -138,10 +143,16 @@ impl Default for InstanceGridConfig {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct SceneConfig {
     pub camera: CameraConfig,
     pub grid: InstanceGridConfig,
-    pub model_file: &'static str,
+    /// The model to draw, resolved against [`base_dir`](Self::base_dir) before the embedded
+    /// asset table.
+    pub model_file: String,
+    /// The directory relative paths are resolved against, normally the one holding the scene
+    /// file. `None` restricts the scene to embedded assets, which is what wasm gets.
+    pub base_dir: Option<PathBuf>,
     pub light_intensity_scale: f32,
     pub sun: SunConfig,
 }
@@ -151,7 +162,8 @@ impl Default for SceneConfig {
         Self {
             camera: CameraConfig::close_up(),
             grid: InstanceGridConfig::default(),
-            model_file: "cube_diorama.glb",
+            model_file: String::from("cube_diorama.glb"),
+            base_dir: None,
             light_intensity_scale: 0.005,
             sun: SunConfig::default(),
         }

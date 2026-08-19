@@ -5,7 +5,11 @@ pub mod debug;
 pub mod gfx;
 pub mod renderer;
 pub mod scene;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod scene_file;
 pub mod shadow;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod watch;
 
 pub use app::{Action, App, Engine, run};
 pub use config::{CameraConfig, InstanceGridConfig, PipelineMode, RendererConfig, SceneConfig};

@@ -1,0 +1,37 @@
+# The scene the renderer loads when no --scene argument is given.
+#
+# Save this file while the renderer is running and it reloads in place; press R to force a reload.
+# Every key is optional and falls back to the built-in default, so a scene file can be as short as
+# a single `model` line.
+
+# Looked for on disk relative to this file first, then in the embedded asset table.
+# Hot reloading is .glb only: an .obj resolves its .mtl and textures against the embedded assets
+# rather than its own directory.
+model = "cube_diorama.glb"
+
+# Scales the punctual lights the model itself declares. glTF stores them in candela, which is far
+# too bright for the shader's units.
+light_intensity_scale = 0.005
+
+[camera]
+position = [2.5, 2.0, 2.5]
+yaw = -135.0
+pitch = -20.0
+fovy = 45.0
+znear = 0.05
+zfar = 100.0
+speed = 2.0
+sensitivity = 1.0
+
+# The directional light, added on top of whatever the model declares. It is the only light that
+# casts cascaded shadows.
+[sun]
+direction = [-0.4, -1.0, -0.3]
+color = [1.0, 0.98, 0.92]
+intensity = 1.5
+
+# Only used when the model brings no node placements of its own; otherwise the model's own
+# transforms decide where its meshes go.
+[grid]
+instances_per_row = 10
+space_between = 3.0

@@ -18,6 +18,12 @@ wgpu = "30.0"
 bytemuck = { version = "1.24", features = [ "derive" ] }
 tobj = { version = "3.2", default-features = false, features = ["async"]}
 gltf = { version = "1.4", default-features = false, features = ["import", "utils", "names", "KHR_lights_punctual", "KHR_materials_emissive_strength"] }
+serde = { version = "1.0", features = ["derive"] }
+
+# Reading and watching a scene file needs a filesystem, which wasm does not have.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+toml = "0.9"
+notify = "8.2"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 console_error_panic_hook = "0.1.6"

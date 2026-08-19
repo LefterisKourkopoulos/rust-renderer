@@ -10,6 +10,19 @@ pub struct GpuContext {
     pub is_surface_configured: bool,
 }
 
+/// Everything a [`GpuContext`] holds except the surface.
+///
+/// The surface belongs to the window, but the device and queue are `Send`, so this is the slice of
+/// the context a background loader can take with it. `config` is a *snapshot*: if the window is
+/// resized while a load is in flight the aspect ratio it implies goes stale, which is why a scene
+/// is resized to the live window immediately after being swapped in.
+#[derive(Clone)]
+pub struct GpuHandle {
+    pub device: wgpu::Device,
+    pub queue: wgpu::Queue,
+    pub config: wgpu::SurfaceConfiguration,
+}
+
 impl GpuContext {
     pub async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
         let size = window.inner_size();
@@ -79,6 +92,15 @@ impl GpuContext {
             config,
             is_surface_configured: false,
         })
+    }
+
+    /// The device, queue and surface configuration, detached from the window's surface.
+    pub fn handle(&self) -> GpuHandle {
+        GpuHandle {
+            device: self.device.clone(),
+            queue: self.queue.clone(),
+            config: self.config.clone(),
+        }
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {

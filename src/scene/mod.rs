@@ -7,7 +7,7 @@ use wgpu::util::DeviceExt;
 
 use crate::assets;
 use crate::config::SceneConfig;
-use crate::gfx::{CubeTexture, GpuContext, HdrLoader, Layouts, Texture};
+use crate::gfx::{CubeTexture, GpuHandle, HdrLoader, Layouts, Texture};
 use light::{Light, LightCollection};
 use camera::{CameraMove, CameraState};
 use instance::Instance;
@@ -37,8 +37,13 @@ struct DiffuseOverride {
 }
 
 impl Scene {
+    /// Builds a scene from `config`.
+    ///
+    /// Takes a [`GpuHandle`] rather than the full [`GpuContext`](crate::gfx::GpuContext) so it can
+    /// run on a background thread while the previous scene keeps rendering; the surface stays on
+    /// the main thread with the window.
     pub async fn new(
-        ctx: &GpuContext,
+        ctx: &GpuHandle,
         config: &SceneConfig,
         layouts: &Layouts,
     ) -> anyhow::Result<Self> {
@@ -76,8 +81,9 @@ impl Scene {
         let camera = CameraState::new(&ctx.device, &ctx.config, &config.camera, &layouts.camera);
 
         // Model
-        let obj_model = assets::load_model(
-            config.model_file,
+        let obj_model = assets::load_model_from(
+            config.base_dir.as_deref(),
+            &config.model_file,
             &ctx.device,
             &ctx.queue,
             &layouts.material,
