@@ -2,18 +2,27 @@ use std::io::{BufReader, Cursor};
 
 use wgpu::util::DeviceExt;
 
+use anyhow::anyhow;
+
 use super::tangents;
-use super::{load_normal_texture, load_string, load_texture};
+use super::{embedded_string, load_normal_texture, load_texture};
 use crate::gfx::Texture;
 use crate::scene::model;
 
+/// Loads an OBJ from `bytes`.
+///
+/// Its `.mtl` and texture references are resolved against the embedded asset table, not the
+/// directory the OBJ came from, so only embedded OBJs load successfully. Hot reloading is
+/// `.glb` only for that reason.
 pub async fn load(
+    bytes: &[u8],
     file_name: &str,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
 ) -> anyhow::Result<model::Model> {
-    let obj_text = load_string(file_name)?;
+    let obj_text = std::str::from_utf8(bytes)
+        .map_err(|e| anyhow!("{file_name} is not valid UTF-8, so it is not a readable OBJ: {e}"))?;
     let obj_cursor = Cursor::new(obj_text);
     let mut obj_reader = BufReader::new(obj_cursor);
 
@@ -25,7 +34,7 @@ pub async fn load(
             ..Default::default()
         },
         |p| async move {
-            match load_string(&p) {
+            match embedded_string(&p) {
                 Ok(mat_text) => tobj::load_mtl_buf(&mut BufReader::new(Cursor::new(mat_text))),
                 Err(_) => Err(tobj::LoadError::OpenFileFailed),
             }

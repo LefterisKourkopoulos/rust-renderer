@@ -12,13 +12,14 @@ use crate::scene::model;
 
 const FLAT_NORMAL: [u8; 4] = [128, 128, 255, 255];
 
+/// Loads a glTF or GLB from `bytes`. `file_name` only labels resources and error messages.
 pub fn load(
+    bytes: &[u8],
     file_name: &str,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
 ) -> anyhow::Result<model::Model> {
-    let bytes = super::load_binary(file_name)?;
     let (document, buffers, images) = gltf::import_slice(bytes)
         .with_context(|| format!("{file_name} is not a readable glTF or GLB file"))?;
 
@@ -427,7 +428,7 @@ mod tests {
     use super::*;
 
     fn diorama() -> gltf::Document {
-        let bytes = super::super::load_binary("cube_diorama.glb").expect("the diorama is embedded");
+        let bytes = super::super::embedded("cube_diorama.glb").expect("the diorama is embedded");
         let (document, _, _) = gltf::import_slice(bytes).expect("the diorama parses");
         document
     }

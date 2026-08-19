@@ -2,6 +2,10 @@ mod gltf_loader;
 mod obj;
 mod tangents;
 
+use std::path::Path;
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::PathBuf;
+
 use anyhow::anyhow;
 
 use crate::gfx::Texture;
@@ -18,7 +22,8 @@ const ASSETS: &[(&str, &[u8])] = &[
     ("cube_diorama.glb", include_bytes!("res/cube_diorama.glb")),
 ];
 
-pub fn load_binary(file_name: &str) -> anyhow::Result<&'static [u8]> {
+/// The bytes of an asset baked into the binary at compile time.
+pub fn embedded(file_name: &str) -> anyhow::Result<&'static [u8]> {
     ASSETS
         .iter()
         .find(|(name, _)| *name == file_name)
@@ -26,9 +31,83 @@ pub fn load_binary(file_name: &str) -> anyhow::Result<&'static [u8]> {
         .ok_or_else(|| anyhow!("no embedded asset named {file_name}"))
 }
 
-pub fn load_string(file_name: &str) -> anyhow::Result<&'static str> {
-    let bytes = load_binary(file_name)?;
+pub fn embedded_string(file_name: &str) -> anyhow::Result<&'static str> {
+    let bytes = embedded(file_name)?;
     std::str::from_utf8(bytes).map_err(|e| anyhow!("embedded asset {file_name} is not UTF-8: {e}"))
+}
+
+/// Where an asset's bytes came from.
+///
+/// Borrows when embedded and owns when read from disk, so resolving an embedded asset stays
+/// allocation free.
+pub enum Source {
+    Disk(Vec<u8>),
+    Embedded(&'static [u8]),
+}
+
+impl Source {
+    pub fn bytes(&self) -> &[u8] {
+        match self {
+            Source::Disk(bytes) => bytes,
+            Source::Embedded(bytes) => bytes,
+        }
+    }
+
+    pub fn is_disk(&self) -> bool {
+        matches!(self, Source::Disk(_))
+    }
+}
+
+/// Reports where the bytes came from and how many there are, rather than the bytes themselves,
+/// which for a model run to megabytes.
+impl std::fmt::Debug for Source {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let origin = if self.is_disk() { "disk" } else { "embedded" };
+        write!(f, "Source::{origin}({} bytes)", self.bytes().len())
+    }
+}
+
+/// Resolves `path` to bytes, preferring a real file and falling back to the embedded table.
+///
+/// A relative `path` is taken relative to `base_dir` when one is given, which is how a scene
+/// file refers to a model sitting next to it. Reading from disk is native only; on wasm there
+/// is no filesystem, so only the embedded table is consulted.
+pub fn resolve(base_dir: Option<&Path>, path: &str) -> anyhow::Result<Source> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let candidate = match base_dir {
+            Some(dir) => dir.join(path),
+            None => PathBuf::from(path),
+        };
+
+        match std::fs::read(&candidate) {
+            Ok(bytes) => return Ok(Source::Disk(bytes)),
+            // Not on disk is not an error: the name may refer to an embedded asset.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                return Err(anyhow!("cannot read {}: {e}", candidate.display()));
+            }
+        }
+    }
+
+    // The embedded table is keyed by bare file name, so a path like "models/cube.glb" still
+    // finds the asset embedded as "cube.glb".
+    let name = file_name(path);
+    match embedded(name) {
+        Ok(bytes) => Ok(Source::Embedded(bytes)),
+        Err(_) => Err(match base_dir {
+            Some(dir) => anyhow!(
+                "cannot find {path}: it is not at {} and there is no embedded asset named {name}",
+                dir.join(path).display()
+            ),
+            None => anyhow!("cannot find {path}: no such file and no embedded asset named {name}"),
+        }),
+    }
+}
+
+/// The final component of a `/`-separated path.
+fn file_name(path: &str) -> &str {
+    path.rsplit_once('/').map_or(path, |(_, name)| name)
 }
 
 pub fn load_texture(
@@ -36,7 +115,7 @@ pub fn load_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
 ) -> anyhow::Result<Texture> {
-    let data = load_binary(file_name)?;
+    let data = embedded(file_name)?;
     Texture::from_bytes(device, queue, data, file_name, false)
 }
 
@@ -45,7 +124,7 @@ pub fn load_normal_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
 ) -> anyhow::Result<Texture> {
-    let data = load_binary(file_name)?;
+    let data = embedded(file_name)?;
     Texture::from_bytes(device, queue, data, file_name, true)
 }
 
@@ -58,21 +137,52 @@ fn extension(file_name: &str) -> Option<String> {
     Some(extension.to_ascii_lowercase())
 }
 
+/// Loads a model named relative to the embedded asset table.
 pub async fn load_model(
     file_name: &str,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
 ) -> anyhow::Result<model::Model> {
-    match extension(file_name).as_deref() {
-        Some("obj") => obj::load(file_name, device, queue, layout).await,
-        Some("gltf") | Some("glb") => gltf_loader::load(file_name, device, queue, layout),
-        Some(other) => Err(anyhow!(
-            "unsupported model format {other:?} for {file_name}; expected obj, gltf or glb"
+    load_model_from(None, file_name, device, queue, layout).await
+}
+
+/// Loads a model, looking for it on disk relative to `base_dir` before the embedded table.
+pub async fn load_model_from(
+    base_dir: Option<&Path>,
+    path: &str,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layout: &wgpu::BindGroupLayout,
+) -> anyhow::Result<model::Model> {
+    let extension = extension(path);
+
+    // Checked before reading, so an unsupported format fails the same way whether or not the
+    // file happens to exist.
+    match extension.as_deref() {
+        Some("obj") | Some("gltf") | Some("glb") => {}
+        Some(other) => {
+            return Err(anyhow!(
+                "unsupported model format {other:?} for {path}; expected obj, gltf or glb"
+            ));
+        }
+        None => {
+            return Err(anyhow!(
+                "cannot determine the model format of {path}: it has no file extension"
+            ));
+        }
+    }
+
+    let source = resolve(base_dir, path)?;
+    let bytes = source.bytes();
+
+    match extension.as_deref() {
+        Some("obj") if source.is_disk() => Err(anyhow!(
+            "{path} is an OBJ on disk, which is not supported: its .mtl and textures are \
+             resolved against the embedded assets, not its own directory. Use a .glb instead."
         )),
-        None => Err(anyhow!(
-            "cannot determine the model format of {file_name}: it has no file extension"
-        )),
+        Some("obj") => obj::load(bytes, path, device, queue, layout).await,
+        _ => gltf_loader::load(bytes, path, device, queue, layout),
     }
 }
 
@@ -111,10 +221,82 @@ mod tests {
 
     #[test]
     fn the_diorama_is_embedded_and_is_a_binary_gltf() {
-        let bytes = load_binary("cube_diorama.glb").expect("the diorama is embedded");
+        let bytes = embedded("cube_diorama.glb").expect("the diorama is embedded");
         assert!(
             bytes.starts_with(b"glTF"),
             "a .glb must start with the glTF magic"
         );
+    }
+
+    #[test]
+    fn file_name_takes_the_last_path_component() {
+        assert_eq!(file_name("models/scene/cube.glb"), "cube.glb");
+        assert_eq!(file_name("cube.glb"), "cube.glb");
+    }
+
+    #[test]
+    fn resolving_an_embedded_name_does_not_touch_the_disk() {
+        let source = resolve(None, "cube_diorama.glb").expect("the diorama is embedded");
+
+        assert!(
+            !source.is_disk(),
+            "an embedded asset must resolve without a filesystem read"
+        );
+        assert!(source.bytes().starts_with(b"glTF"));
+    }
+
+    #[test]
+    fn a_path_still_finds_the_asset_embedded_under_its_bare_name() {
+        let source = resolve(None, "models/cube_diorama.glb")
+            .expect("the bare file name is in the embedded table");
+
+        assert!(source.bytes().starts_with(b"glTF"));
+    }
+
+    #[test]
+    fn a_name_that_is_neither_on_disk_nor_embedded_is_reported_with_both_places_tried() {
+        let error = resolve(Some(Path::new("/tmp/scenes")), "nope.glb")
+            .expect_err("nothing named nope.glb exists");
+        let message = error.to_string();
+
+        assert!(
+            message.contains("/tmp/scenes/nope.glb") && message.contains("nope.glb"),
+            "the error should name the path it tried, got: {message}"
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_file_on_disk_wins_over_an_embedded_asset_of_the_same_name() {
+        let dir = std::env::temp_dir().join("rust-renderer-resolve-test");
+        std::fs::create_dir_all(&dir).expect("create the temp dir");
+        let path = dir.join("cube_diorama.glb");
+        std::fs::write(&path, b"glTF from disk").expect("write the stand-in file");
+
+        let source = resolve(Some(&dir), "cube_diorama.glb").expect("the file is on disk");
+
+        assert!(source.is_disk(), "a real file must take priority");
+        assert_eq!(source.bytes(), b"glTF from disk");
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_relative_model_path_is_resolved_against_the_base_directory() {
+        let dir = std::env::temp_dir().join("rust-renderer-resolve-nested");
+        std::fs::create_dir_all(dir.join("models")).expect("create the nested temp dirs");
+        let path = dir.join("models/local.glb");
+        std::fs::write(&path, b"glTF nested").expect("write the stand-in file");
+
+        let source = resolve(Some(&dir), "models/local.glb").expect("the nested file is on disk");
+
+        assert_eq!(
+            source.bytes(),
+            b"glTF nested",
+            "a relative path must be joined onto the base directory"
+        );
+
+        std::fs::remove_file(&path).ok();
     }
 }

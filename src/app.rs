@@ -10,7 +10,7 @@ use winit::{
 };
 
 use crate::config::{RendererConfig, SceneConfig};
-use crate::gfx::GpuContext;
+use crate::gfx::{GpuContext, Layouts};
 use crate::renderer::Renderer;
 use crate::scene::Scene;
 use crate::scene::camera::CameraMove;
@@ -69,6 +69,10 @@ fn action_for_key(key_code: KeyCode, is_pressed: bool) -> Option<Action> {
 pub struct Engine {
     window: Arc<Window>,
     ctx: GpuContext,
+    /// Owned above both the scene and the renderer, so the two agree on bind group layouts
+    /// even after the scene is replaced.
+    #[allow(dead_code)]
+    layouts: Layouts,
     renderer: Renderer,
     scene: Scene,
     last_update: Instant,
@@ -77,12 +81,14 @@ pub struct Engine {
 impl Engine {
     pub async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
         let ctx = GpuContext::new(window.clone()).await?;
-        let scene = Scene::new(&ctx, &SceneConfig::default()).await?;
-        let renderer = Renderer::new(&ctx, &scene, RendererConfig::default());
+        let layouts = Layouts::new(&ctx.device);
+        let scene = Scene::new(&ctx, &SceneConfig::default(), &layouts).await?;
+        let renderer = Renderer::new(&ctx, &layouts, RendererConfig::default());
 
         Ok(Self {
             window,
             ctx,
+            layouts,
             renderer,
             scene,
             last_update: Instant::now(),

@@ -9,7 +9,7 @@ const IMAGES: &[&str] = &[
 #[test]
 fn every_embedded_image_decodes_to_real_pixels() {
     for name in IMAGES {
-        let bytes = rust_renderer::assets::load_binary(name)
+        let bytes = rust_renderer::assets::embedded(name)
             .unwrap_or_else(|e| panic!("{name} is not embedded: {e}"));
         let image = image::load_from_memory(bytes)
             .unwrap_or_else(|e| panic!("{name} does not decode: {e}"));
@@ -36,7 +36,7 @@ fn every_embedded_image_decodes_to_real_pixels() {
 fn the_image_list_covers_every_embedded_image() {
     for name in IMAGES {
         assert!(
-            rust_renderer::assets::load_binary(name).is_ok(),
+            rust_renderer::assets::embedded(name).is_ok(),
             "{name} is listed here but no longer embedded"
         );
     }

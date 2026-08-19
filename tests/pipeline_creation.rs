@@ -3,7 +3,7 @@ use rust_renderer::config::ShadowConfig;
 use rust_renderer::scene::instance::InstanceRaw;
 use rust_renderer::scene::model::ModelVertex;
 use rust_renderer::shadow::ShadowPass;
-use rust_renderer::{Texture, gfx};
+use rust_renderer::{Layouts, Texture, gfx};
 
 fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
@@ -54,35 +54,7 @@ fn the_scene_pipeline_builds_against_the_real_shader() {
         return;
     };
 
-    let material_layout = Texture::material_bind_group_layout(&device, "material");
-    let camera_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("camera"),
-        entries: &[wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        }],
-    });
-    let light_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("light"),
-        entries: &[wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        }],
-    });
-
-    let shadow_layout = ShadowPass::bind_group_layout(&device);
+    let layouts = Layouts::new(&device);
 
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Shader"),
@@ -94,10 +66,10 @@ fn the_scene_pipeline_builds_against_the_real_shader() {
         &gfx::pipeline::RenderPipelineConfig::new(
             "Render Pipeline",
             &[
-                &material_layout,
-                &camera_layout,
-                &light_layout,
-                &shadow_layout,
+                &layouts.material,
+                &layouts.camera,
+                &layouts.light,
+                &layouts.shadow,
             ],
             &shader,
             wgpu::TextureFormat::Bgra8UnormSrgb,
@@ -115,7 +87,8 @@ fn the_shadow_pass_builds_against_the_real_shader() {
         return;
     };
 
-    let _shadow = ShadowPass::new(&device, ShadowConfig::default());
+    let layouts = Layouts::new(&device);
+    let _shadow = ShadowPass::new(&device, ShadowConfig::default(), &layouts.shadow);
 
     wait(&device);
 }

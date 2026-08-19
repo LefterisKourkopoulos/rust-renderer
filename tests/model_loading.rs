@@ -137,7 +137,7 @@ fn base_colour_maps_decode_as_srgb_and_normal_maps_stay_linear() {
 
 #[test]
 fn tiling_textures_keep_the_repeat_wrapping_the_file_asks_for() {
-    let bytes = assets::load_binary("cube_diorama.glb").expect("the diorama is embedded");
+    let bytes = assets::embedded("cube_diorama.glb").expect("the diorama is embedded");
     let (document, _, _) = gltf::import_slice(bytes).expect("the diorama parses");
 
     let repeating = document
@@ -157,7 +157,7 @@ fn tiling_textures_keep_the_repeat_wrapping_the_file_asks_for() {
 
 #[test]
 fn the_diorama_geometry_is_finite_and_roughly_room_sized() {
-    let bytes = assets::load_binary("cube_diorama.glb").expect("the diorama is embedded");
+    let bytes = assets::embedded("cube_diorama.glb").expect("the diorama is embedded");
     let (document, buffers, _) = gltf::import_slice(bytes).expect("the diorama parses");
 
     let mut min = [f32::INFINITY; 3];

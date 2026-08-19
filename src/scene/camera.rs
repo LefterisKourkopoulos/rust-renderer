@@ -189,7 +189,6 @@ pub struct CameraState {
     projection: Projection,
     uniform: CameraUniform,
     buffer: wgpu::Buffer,
-    bind_group_layout: wgpu::BindGroupLayout,
     bind_group: wgpu::BindGroup,
     controller: CameraController,
 }
@@ -199,6 +198,7 @@ impl CameraState {
         device: &wgpu::Device,
         config: &wgpu::SurfaceConfiguration,
         camera_config: &CameraConfig,
+        layout: &wgpu::BindGroupLayout,
     ) -> Self {
         let camera = Camera {
             position: camera_config.position.into(),
@@ -222,22 +222,8 @@ impl CameraState {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-            label: Some("camera_bind_group_layout"),
-        });
-
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &bind_group_layout,
+            layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: buffer.as_entire_binding(),
@@ -250,7 +236,6 @@ impl CameraState {
             projection,
             uniform,
             buffer,
-            bind_group_layout,
             bind_group,
             controller: CameraController::new(camera_config.speed, camera_config.sensitivity),
         }
@@ -258,10 +243,6 @@ impl CameraState {
 
     pub fn bind_group(&self) -> &wgpu::BindGroup {
         &self.bind_group
-    }
-
-    pub fn bind_group_layout(&self) -> &wgpu::BindGroupLayout {
-        &self.bind_group_layout
     }
 
     pub fn view(&self) -> cgmath::Matrix4<f32> {

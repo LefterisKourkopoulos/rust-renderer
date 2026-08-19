@@ -44,13 +44,16 @@ pub struct ShadowPass {
     cascade_buffer: wgpu::Buffer,
     cascade_bind_groups: Vec<wgpu::BindGroup>,
     bind_group: wgpu::BindGroup,
-    bind_group_layout: wgpu::BindGroupLayout,
     pipeline: wgpu::RenderPipeline,
     config: ShadowConfig,
 }
 
 impl ShadowPass {
-    pub fn new(device: &wgpu::Device, config: ShadowConfig) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        config: ShadowConfig,
+        layout: &wgpu::BindGroupLayout,
+    ) -> Self {
         let cascade_count = config.cascade_count();
 
         let depth = Texture::create_depth_array(
@@ -109,10 +112,9 @@ impl ShadowPass {
             })
             .collect();
 
-        let bind_group_layout = Self::bind_group_layout(device);
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("shadow_bind_group"),
-            layout: &bind_group_layout,
+            layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -161,48 +163,9 @@ impl ShadowPass {
             cascade_buffer,
             cascade_bind_groups,
             bind_group,
-            bind_group_layout,
             pipeline,
             config,
         }
-    }
-
-    pub fn bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("shadow_bind_group_layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        multisampled: false,
-                        view_dimension: wgpu::TextureViewDimension::D2Array,
-                        sample_type: wgpu::TextureSampleType::Depth,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
-                    count: None,
-                },
-            ],
-        })
-    }
-
-    pub fn layout(&self) -> &wgpu::BindGroupLayout {
-        &self.bind_group_layout
     }
 
     pub fn bind_group(&self) -> &wgpu::BindGroup {

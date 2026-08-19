@@ -7,7 +7,7 @@ use wgpu::util::DeviceExt;
 
 use crate::assets;
 use crate::config::SceneConfig;
-use crate::gfx::{CubeTexture, GpuContext, HdrLoader, Texture};
+use crate::gfx::{CubeTexture, GpuContext, HdrLoader, Layouts, Texture};
 use light::{Light, LightCollection};
 use camera::{CameraMove, CameraState};
 use instance::Instance;
@@ -19,12 +19,10 @@ pub struct Scene {
     pub instance_buffer: wgpu::Buffer,
     pub camera: CameraState,
     pub lights: LightCollection,
-    texture_bind_group_layout: wgpu::BindGroupLayout,
     diffuse_overrides: Vec<DiffuseOverride>,
     diffuse_override: Option<usize>,
     #[allow(dead_code)]
     sky_texture: CubeTexture,
-    environment_bind_group_layout: wgpu::BindGroupLayout,
     environment_bind_group: wgpu::BindGroup,
 }
 
@@ -39,11 +37,11 @@ struct DiffuseOverride {
 }
 
 impl Scene {
-    pub async fn new(ctx: &GpuContext, config: &SceneConfig) -> anyhow::Result<Self> {
-        // Textures
-        let texture_bind_group_layout =
-            Texture::material_bind_group_layout(&ctx.device, "texture_bind_group_layout");
-
+    pub async fn new(
+        ctx: &GpuContext,
+        config: &SceneConfig,
+        layouts: &Layouts,
+    ) -> anyhow::Result<Self> {
         let override_names = ["happy-tree.png", "centrica_logo.png"];
 
         let mut diffuse_overrides = Vec::with_capacity(override_names.len());
@@ -60,7 +58,7 @@ impl Scene {
                 model::MaterialUniform::default().buffer(&ctx.device, "diffuse_override");
             let bind_group = Texture::material_bind_group(
                 &ctx.device,
-                &texture_bind_group_layout,
+                &layouts.material,
                 &texture,
                 &normal_texture,
                 &uniform_buffer,
@@ -75,14 +73,14 @@ impl Scene {
         }
 
         // Camera
-        let camera = CameraState::new(&ctx.device, &ctx.config, &config.camera);
+        let camera = CameraState::new(&ctx.device, &ctx.config, &config.camera, &layouts.camera);
 
         // Model
         let obj_model = assets::load_model(
             config.model_file,
             &ctx.device,
             &ctx.queue,
-            &texture_bind_group_layout,
+            &layouts.material,
         )
         .await?;
 
@@ -132,11 +130,11 @@ impl Scene {
             ),
         );
 
-        let lights = LightCollection::new(&ctx.device, lights, animate);
+        let lights = LightCollection::new(&ctx.device, lights, animate, &layouts.light);
 
         // Skybox
         let hdr_loader = HdrLoader::new(&ctx.device);
-        let sky_bytes = assets::load_binary("pure-sky-hdri.jpg")?;
+        let sky_bytes = assets::embedded("pure-sky-hdri.jpg")?;
         let sky_texture = hdr_loader.from_equirect_bytes(
             &ctx.device,
             &ctx.queue,
@@ -145,32 +143,9 @@ impl Scene {
             Some("Sky Texture"),
         )?;
 
-        let environment_bind_group_layout =
-            ctx.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("environment_layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                            view_dimension: wgpu::TextureViewDimension::Cube,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
-                        count: None,
-                    },
-                ],
-            });
-
         let environment_bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("environment_bind_group"),
-            layout: &environment_bind_group_layout,
+            layout: &layouts.environment,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -189,21 +164,11 @@ impl Scene {
             instance_buffer,
             camera,
             lights,
-            texture_bind_group_layout,
             diffuse_overrides,
             diffuse_override: None,
             sky_texture,
-            environment_bind_group_layout,
             environment_bind_group,
         })
-    }
-
-    pub fn texture_bind_group_layout(&self) -> &wgpu::BindGroupLayout {
-        &self.texture_bind_group_layout
-    }
-
-    pub fn environment_bind_group_layout(&self) -> &wgpu::BindGroupLayout {
-        &self.environment_bind_group_layout
     }
 
     pub fn environment_bind_group(&self) -> &wgpu::BindGroup {

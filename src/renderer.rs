@@ -1,6 +1,8 @@
 use crate::config::{PipelineMode, RendererConfig};
 use crate::debug::{CascadeDebug, DepthDebug};
-use crate::gfx::{GpuContext, HdrPipeline, Texture, Vertex, create_render_pipeline, pipeline};
+use crate::gfx::{
+    GpuContext, HdrPipeline, Layouts, Texture, Vertex, create_render_pipeline, pipeline,
+};
 use crate::scene::Scene;
 use crate::scene::instance::InstanceRaw;
 use crate::scene::model::{DrawModel, ModelVertex};
@@ -20,12 +22,14 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub fn new(ctx: &GpuContext, scene: &Scene, config: RendererConfig) -> Self {
+    /// Builds every pipeline from `layouts` alone, so the renderer is independent of any
+    /// particular scene and a scene swapped in later stays compatible.
+    pub fn new(ctx: &GpuContext, layouts: &Layouts, config: RendererConfig) -> Self {
         let depth_texture =
             Texture::create_depth_texture(&ctx.device, &ctx.config, "depth_texture");
         let depth_debug = DepthDebug::new(&ctx.device, &depth_texture, ctx.config.format);
 
-        let shadow = ShadowPass::new(&ctx.device, config.shadows.clone());
+        let shadow = ShadowPass::new(&ctx.device, config.shadows.clone(), &layouts.shadow);
         let cascade_debug = CascadeDebug::new(
             &ctx.device,
             shadow.depth_view(),
@@ -55,10 +59,10 @@ impl Renderer {
             &pipeline::RenderPipelineConfig::new(
                 "Render Pipeline",
                 &[
-                    scene.texture_bind_group_layout(),
-                    scene.camera.bind_group_layout(),
-                    &scene.lights.bind_group_layout,
-                    shadow.layout(),
+                    &layouts.material,
+                    &layouts.camera,
+                    &layouts.light,
+                    &layouts.shadow,
                 ],
                 &instance_shader,
                 color_format,
@@ -78,10 +82,7 @@ impl Renderer {
             &ctx.device,
             &pipeline::RenderPipelineConfig::new(
                 "Light Pipeline",
-                &[
-                    scene.camera.bind_group_layout(),
-                    &scene.lights.bind_group_layout,
-                ],
+                &[&layouts.camera, &layouts.light],
                 &light_shader,
                 color_format,
             )
@@ -100,10 +101,7 @@ impl Renderer {
             &ctx.device,
             &pipeline::RenderPipelineConfig::new(
                 "Sky Pipeline",
-                &[
-                    scene.camera.bind_group_layout(),
-                    scene.environment_bind_group_layout(),
-                ],
+                &[&layouts.camera, &layouts.environment],
                 &sky_shader,
                 color_format,
             ),

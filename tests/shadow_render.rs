@@ -1,3 +1,4 @@
+use rust_renderer::Layouts;
 use rust_renderer::config::{CameraConfig, ShadowConfig};
 use rust_renderer::scene::camera::CameraState;
 use rust_renderer::scene::instance::Instance;
@@ -174,15 +175,22 @@ fn the_cascade_pass_writes_caster_depth_into_its_layer() {
     };
 
     let resolution = 256;
+    let layouts = Layouts::new(&device);
     let mut shadow = ShadowPass::new(
         &device,
         ShadowConfig {
             resolution,
             ..ShadowConfig::default()
         },
+        &layouts.shadow,
     );
 
-    let camera = CameraState::new(&device, &surface_config(), &CameraConfig::default());
+    let camera = CameraState::new(
+        &device,
+        &surface_config(),
+        &CameraConfig::default(),
+        &layouts.camera,
+    );
     shadow.update(&queue, &camera, [-0.4, -1.0, -0.3]);
 
     let model = ground_quad(&device);
@@ -229,12 +237,14 @@ fn the_nearest_cascade_covers_a_caster_right_in_front_of_the_camera() {
     };
 
     let resolution = 256;
+    let layouts = Layouts::new(&device);
     let mut shadow = ShadowPass::new(
         &device,
         ShadowConfig {
             resolution,
             ..ShadowConfig::default()
         },
+        &layouts.shadow,
     );
 
     let camera = CameraState::new(
@@ -246,6 +256,7 @@ fn the_nearest_cascade_covers_a_caster_right_in_front_of_the_camera() {
             yaw: 0.0,
             ..CameraConfig::default()
         },
+        &layouts.camera,
     );
     shadow.update(&queue, &camera, [-0.4, -1.0, -0.3]);
 
@@ -272,21 +283,25 @@ fn the_nearest_cascade_covers_a_caster_right_in_front_of_the_camera() {
     );
 }
 
-fn shade_one_pixel(device: &wgpu::Device, queue: &wgpu::Queue, shadow: &ShadowPass) -> [f32; 4] {
+fn shade_one_pixel(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layouts: &Layouts,
+    shadow: &ShadowPass,
+) -> [f32; 4] {
     use rust_renderer::Texture;
     use rust_renderer::gfx::{self, Vertex};
     use rust_renderer::scene::instance::InstanceRaw;
 
     let format = wgpu::TextureFormat::Rgba8Unorm;
 
-    let material_layout = Texture::material_bind_group_layout(device, "material");
     let white = Texture::from_color(device, queue, [255, 255, 255, 255], false, "white");
     let flat_normal = Texture::from_color(device, queue, [128, 128, 255, 255], true, "flat_normal");
     let material_uniform = rust_renderer::scene::model::MaterialUniform::default();
     let material_buffer = material_uniform.buffer(device, "material");
     let material_bind_group = Texture::material_bind_group(
         device,
-        &material_layout,
+        &layouts.material,
         &white,
         &flat_normal,
         &material_buffer,
@@ -302,6 +317,7 @@ fn shade_one_pixel(device: &wgpu::Device, queue: &wgpu::Queue, shadow: &ShadowPa
             yaw: 0.0,
             ..CameraConfig::default()
         },
+        &layouts.camera,
     );
 
     let lights = rust_renderer::scene::light::LightCollection::new(
@@ -312,6 +328,7 @@ fn shade_one_pixel(device: &wgpu::Device, queue: &wgpu::Queue, shadow: &ShadowPa
             1.0,
         )],
         false,
+        &layouts.light,
     );
 
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -324,10 +341,10 @@ fn shade_one_pixel(device: &wgpu::Device, queue: &wgpu::Queue, shadow: &ShadowPa
         &gfx::pipeline::RenderPipelineConfig::new(
             "Render Pipeline",
             &[
-                &material_layout,
-                camera.bind_group_layout(),
-                &lights.bind_group_layout,
-                shadow.layout(),
+                &layouts.material,
+                &layouts.camera,
+                &layouts.light,
+                &layouts.shadow,
             ],
             &shader,
             format,
@@ -463,6 +480,7 @@ fn a_shadow_pass_that_never_updated_leaves_the_scene_lit() {
         return;
     };
 
+    let layouts = Layouts::new(&device);
     let shadow = ShadowPass::new(
         &device,
         ShadowConfig {
@@ -470,9 +488,10 @@ fn a_shadow_pass_that_never_updated_leaves_the_scene_lit() {
             enabled: false,
             ..ShadowConfig::default()
         },
+        &layouts.shadow,
     );
 
-    let unshadowed = shade_one_pixel(&device, &queue, &shadow);
+    let unshadowed = shade_one_pixel(&device, &queue, &layouts, &shadow);
 
     assert!(
         unshadowed[0] > 0.2,
@@ -487,12 +506,14 @@ fn an_updated_shadow_pass_occludes_ground_under_a_caster() {
         return;
     };
 
+    let layouts = Layouts::new(&device);
     let mut shadow = ShadowPass::new(
         &device,
         ShadowConfig {
             resolution: 256,
             ..ShadowConfig::default()
         },
+        &layouts.shadow,
     );
 
     let camera = CameraState::new(
@@ -504,6 +525,7 @@ fn an_updated_shadow_pass_occludes_ground_under_a_caster() {
             yaw: 0.0,
             ..CameraConfig::default()
         },
+        &layouts.camera,
     );
     shadow.update(&queue, &camera, [-0.4, -1.0, -0.3]);
 
@@ -521,7 +543,7 @@ fn an_updated_shadow_pass_occludes_ground_under_a_caster() {
     shadow.render(&mut encoder, &occluder, &instance_buffer, 1);
     queue.submit(std::iter::once(encoder.finish()));
 
-    let shadowed = shade_one_pixel(&device, &queue, &shadow);
+    let shadowed = shade_one_pixel(&device, &queue, &layouts, &shadow);
 
     assert!(
         shadowed[0] < 0.2,

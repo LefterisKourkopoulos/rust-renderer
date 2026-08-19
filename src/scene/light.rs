@@ -142,33 +142,22 @@ pub struct LightCollection {
     lights: Vec<Light>,
     animate: bool,
     buffer: wgpu::Buffer,
+    bind_group_layout: wgpu::BindGroupLayout,
     pub bind_group: wgpu::BindGroup,
-    pub bind_group_layout: wgpu::BindGroupLayout,
     pub vertex_buffer: wgpu::Buffer,
     pub index_buffer: wgpu::Buffer,
     pub num_indices: u32,
 }
 
 impl LightCollection {
-    pub fn new(device: &wgpu::Device, lights: Vec<Light>, animate: bool) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        lights: Vec<Light>,
+        animate: bool,
+        layout: &wgpu::BindGroupLayout,
+    ) -> Self {
         let buffer = Self::create_buffer(device, &lights);
-
-        let bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-                label: Some("light_bind_group_layout"),
-            });
-
-        let bind_group = Self::create_bind_group(device, &bind_group_layout, &buffer);
+        let bind_group = Self::create_bind_group(device, layout, &buffer);
 
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Light Vertex Buffer"),
@@ -186,8 +175,10 @@ impl LightCollection {
             lights,
             animate,
             buffer,
+            // Kept so `add` can rebuild the bind group against the very same layout the
+            // pipelines were created with.
+            bind_group_layout: layout.clone(),
             bind_group,
-            bind_group_layout,
             vertex_buffer,
             index_buffer,
             num_indices: CUBE_INDICES.len() as u32,
