@@ -45,7 +45,7 @@ impl Renderer {
                 bind_group_layouts: &[
                     scene.texture_bind_group_layout(),
                     scene.camera.bind_group_layout(),
-                    &scene.light.bind_group_layout
+                    &scene.lights.bind_group_layout
                 ],
                 shader: &instance_shader,
                 vertex_buffers: &[ModelVertex::desc(), InstanceRaw::desc()],
@@ -69,7 +69,7 @@ impl Renderer {
                 label: "Light Pipeline",
                 bind_group_layouts: &[
                     scene.camera.bind_group_layout(),
-                    &scene.light.bind_group_layout
+                    &scene.lights.bind_group_layout
                 ],
                 shader: &light_shader,
                 vertex_buffers: &[ModelVertex::desc()],
@@ -173,15 +173,15 @@ impl Renderer {
                 0..scene.instances.len() as u32,
                 scene.camera.bind_group(),
                 scene.diffuse_override(),
-                &scene.light.bind_group
+                &scene.lights.bind_group
             );
 
             render_pass.set_pipeline(&self.light_pipeline);
-            render_pass.set_vertex_buffer(0, scene.light.vertex_buffer.slice(..));
-            render_pass.set_index_buffer(scene.light.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            render_pass.set_vertex_buffer(0, scene.lights.vertex_buffer.slice(..));
+            render_pass.set_index_buffer(scene.lights.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             render_pass.set_bind_group(0, scene.camera.bind_group(), &[]);
-            render_pass.set_bind_group(1, &scene.light.bind_group, &[]);
-            render_pass.draw_indexed(0..scene.light.num_indices, 0, 0..1);
+            render_pass.set_bind_group(1, &scene.lights.bind_group, &[]);
+            render_pass.draw_indexed(0..scene.lights.num_indices, 0, 0..scene.lights.count());
 
             render_pass.set_pipeline(&self.sky_pipeline);
             render_pass.set_bind_group(0, scene.camera.bind_group(), &[]);

@@ -8,7 +8,7 @@ use wgpu::util::DeviceExt;
 use crate::assets;
 use crate::config::SceneConfig;
 use crate::gfx::{CubeTexture, GpuContext, HdrLoader, Texture};
-use light::{Light};
+use light::{Light, LightCollection};
 use camera::{CameraMove, CameraState};
 use instance::Instance;
 use model::Model;
@@ -18,7 +18,7 @@ pub struct Scene {
     pub instances: Vec<Instance>,
     pub instance_buffer: wgpu::Buffer,
     pub camera: CameraState,
-    pub light: Light,
+    pub lights: LightCollection,
     texture_bind_group_layout: wgpu::BindGroupLayout,
     diffuse_overrides: Vec<DiffuseOverride>,
     diffuse_override: Option<usize>,
@@ -92,10 +92,14 @@ impl Scene {
         .await?;
 
         // Lights
-        let light = Light::new(
+        let lights = LightCollection::new(
             &ctx.device,
-            [2.0, 2.0, 2.0],
-            [1.0, 1.0, 1.0]
+            vec![
+                Light::new([2.0, 2.0, 2.0], [1.0, 0.0, 0.0]),
+                Light::new([-2.0, 2.0, 2.0], [0.0, 1.0, 0.0]),
+                Light::new([2.0, 2.0, -2.0], [0.0, 0.0, 1.0]),
+                Light::new([-2.0, 2.0, -2.0], [1.0, 1.0, 1.0]),
+            ],
         );
 
         // Skybox
@@ -152,7 +156,7 @@ impl Scene {
             instances,
             instance_buffer,
             camera,
-            light,
+            lights,
             texture_bind_group_layout,
             diffuse_overrides,
             diffuse_override: None,
@@ -202,6 +206,6 @@ impl Scene {
 
     pub fn update(&mut self, queue: &wgpu::Queue, dt: f32) {
         self.camera.update(queue, dt);
-        self.light.update(queue, dt);
+        self.lights.update(queue, dt);
     }
 }

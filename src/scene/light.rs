@@ -3,13 +3,36 @@ use wgpu::util::DeviceExt;
 
 use super::model::ModelVertex;
 
+#[derive(Copy, Clone)]
+pub struct Light {
+    pub position: [f32; 3],
+    pub color: [f32; 3],
+}
+
+impl Light {
+    pub fn new(position: [f32; 3], color: [f32; 3]) -> Self {
+        Self { position, color }
+    }
+}
+
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct LightUniform {
+struct LightRaw {
     position: [f32; 3],
     _padding: u32,
     color: [f32; 3],
     _padding2: u32,
+}
+
+impl From<Light> for LightRaw {
+    fn from(light: Light) -> Self {
+        Self {
+            position: light.position,
+            _padding: 0,
+            color: light.color,
+            _padding2: 0,
+        }
+    }
 }
 
 const CUBE_VERTICES: [ModelVertex; 8] = [
@@ -32,11 +55,9 @@ const CUBE_INDICES: [u32; 36] = [
     0, 1, 5, 5, 4, 0,
 ];
 
-pub struct Light {
-    position: [f32; 3],
-    color: [f32; 3],
+pub struct LightCollection {
+    lights: Vec<Light>,
     buffer: wgpu::Buffer,
-    uniform: LightUniform,
     pub bind_group: wgpu::BindGroup,
     pub bind_group_layout: wgpu::BindGroupLayout,
     pub vertex_buffer: wgpu::Buffer,
@@ -44,26 +65,9 @@ pub struct Light {
     pub num_indices: u32,
 }
 
-impl Light {
-    pub fn new(
-        device: &wgpu::Device,
-        position: [f32; 3],
-        color: [f32; 3]
-    ) -> Self {
-        let mut uniform = LightUniform {
-            position: position,
-            _padding: 0,
-            color: color,
-            _padding2: 0,
-        };
-
-        let buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Light VB"),
-                contents: bytemuck::cast_slice(&[uniform]),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            }
-        );
+impl LightCollection {
+    pub fn new(device: &wgpu::Device, lights: Vec<Light>) -> Self {
+        let buffer = Self::create_buffer(device, &lights);
 
         let bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -71,23 +75,16 @@ impl Light {
                     binding: 0,
                     visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
                     count: None,
                 }],
-                label: None,
+                label: Some("light_bind_group_layout"),
             });
 
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: buffer.as_entire_binding(),
-            }],
-            label: None,
-        });
+        let bind_group = Self::create_bind_group(device, &bind_group_layout, &buffer);
 
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Light Vertex Buffer"),
@@ -102,10 +99,8 @@ impl Light {
         });
 
         Self {
-            position,
-            color,
+            lights,
             buffer,
-            uniform,
             bind_group,
             bind_group_layout,
             vertex_buffer,
@@ -114,12 +109,51 @@ impl Light {
         }
     }
 
+    pub fn count(&self) -> u32 {
+        self.lights.len() as u32
+    }
+
+    pub fn add(&mut self, device: &wgpu::Device, light: Light) {
+        self.lights.push(light);
+        self.buffer = Self::create_buffer(device, &self.lights);
+        self.bind_group = Self::create_bind_group(device, &self.bind_group_layout, &self.buffer);
+    }
+
     pub fn update(&mut self, queue: &wgpu::Queue, dt: f32) {
-        let old_position: cgmath::Vector3<f32> = self.uniform.position.into();
-        self.uniform.position =
-            (cgmath::Quaternion::from_axis_angle((0.0, 1.0, 0.0).into(), cgmath::Deg(60.0 * dt))
-                * old_position)
+        for light in &mut self.lights {
+            let old_position: cgmath::Vector3<f32> = light.position.into();
+            light.position = (cgmath::Quaternion::from_axis_angle(
+                (0.0, 1.0, 0.0).into(),
+                cgmath::Deg(60.0 * dt),
+            ) * old_position)
                 .into();
-        queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&[self.uniform]));
+        }
+
+        let raw: Vec<LightRaw> = self.lights.iter().copied().map(LightRaw::from).collect();
+        queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&raw));
+    }
+
+    fn create_buffer(device: &wgpu::Device, lights: &[Light]) -> wgpu::Buffer {
+        let raw: Vec<LightRaw> = lights.iter().copied().map(LightRaw::from).collect();
+        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Light Storage Buffer"),
+            contents: bytemuck::cast_slice(&raw),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        })
+    }
+
+    fn create_bind_group(
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        buffer: &wgpu::Buffer,
+    ) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: buffer.as_entire_binding(),
+            }],
+            label: Some("light_bind_group"),
+        })
     }
 }
