@@ -1,9 +1,3 @@
-//! End-to-end hot reload: a scene file on disk, a real GPU device, a real watcher.
-//!
-//! The unit tests cover parsing and event classification in isolation. What they cannot show is
-//! that saving a file actually produces a new scene built against the layouts the pipelines use,
-//! which is the whole feature.
-
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::path::{Path, PathBuf};
@@ -13,8 +7,6 @@ use rust_renderer::Layouts;
 use rust_renderer::gfx::GpuHandle;
 use rust_renderer::watch::{Loaded, SceneLoader, SceneWatcher};
 
-/// How long a poll loop waits before giving up. Generous: it covers spawning a thread, decoding a
-/// `.glb` and running the cubemap pass on whatever GPU is available.
 const TIMEOUT: Duration = Duration::from_secs(60);
 
 fn handle() -> Option<GpuHandle> {
@@ -66,7 +58,6 @@ fn handle() -> Option<GpuHandle> {
     })
 }
 
-/// A scratch directory of its own per test, so parallel tests do not see each other's saves.
 fn scratch(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("rust-renderer-hot-reload-{name}"));
     std::fs::remove_dir_all(&dir).ok();
@@ -78,7 +69,6 @@ fn write(path: &Path, contents: &str) {
     std::fs::write(path, contents).expect("write the scene file");
 }
 
-/// Polls the loader until it produces something, or the timeout expires.
 fn wait_for_load(loader: &mut SceneLoader) -> Loaded {
     let deadline = Instant::now() + TIMEOUT;
 
@@ -149,8 +139,6 @@ fn a_reload_replaces_the_scene_with_the_saved_contents() {
         Loaded::Failed(e) => panic!("the first load should succeed: {e:#}"),
     };
 
-    // The diorama places its own meshes, so the grid is what a scene without placements would use.
-    // Change the sun instead, which always takes effect.
     write(&path, "[sun]\nintensity = 9.0\n");
     loader.request(&layouts);
     let second = match wait_for_load(&mut loader) {
@@ -241,9 +229,6 @@ fn a_model_beside_the_scene_file_is_preferred_over_the_embedded_one() {
     let path = dir.join("scene.toml");
     write(&path, "model = \"cube_diorama.glb\"\n");
 
-    // Same name as the embedded asset, but not a valid glTF. If the loader reads it, the load
-    // fails; if it silently used the embedded copy instead, it would succeed and the disk-first
-    // rule would be untested.
     std::fs::write(dir.join("cube_diorama.glb"), b"not a glb at all")
         .expect("write the stand-in model");
 
@@ -276,7 +261,6 @@ fn a_burst_of_requests_while_loading_collapses_into_one_follow_up() {
         loader.request(&layouts);
     }
 
-    // The in-flight load, then exactly one follow-up for the whole burst.
     for round in 1..=2 {
         match wait_for_load(&mut loader) {
             Loaded::Scene(_) => {}
@@ -302,7 +286,6 @@ fn saving_the_scene_file_is_noticed_by_the_watcher() {
 
     let mut watcher = SceneWatcher::new(&path).expect("the directory exists");
 
-    // Give notify a moment to register before the write that should be seen.
     std::thread::sleep(Duration::from_millis(200));
     assert!(
         !watcher.poll(),
@@ -339,7 +322,6 @@ fn saving_a_neighbouring_file_does_not_report_a_change() {
 
     std::fs::write(dir.join("notes.txt"), "unrelated").expect("write the neighbour");
 
-    // Long enough for the event to arrive and clear the debounce window if it were accepted.
     std::thread::sleep(Duration::from_millis(500));
 
     assert!(
@@ -366,7 +348,6 @@ fn a_burst_of_saves_is_debounced_into_a_single_change() {
     while Instant::now() < deadline {
         if watcher.poll() {
             changes += 1;
-            // Keep polling past the first hit: an undebounced watcher would report the rest here.
             let settle = Instant::now() + Duration::from_millis(500);
             while Instant::now() < settle {
                 if watcher.poll() {

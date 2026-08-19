@@ -22,7 +22,6 @@ const ASSETS: &[(&str, &[u8])] = &[
     ("cube_diorama.glb", include_bytes!("res/cube_diorama.glb")),
 ];
 
-/// The bytes of an asset baked into the binary at compile time.
 pub fn embedded(file_name: &str) -> anyhow::Result<&'static [u8]> {
     ASSETS
         .iter()
@@ -36,10 +35,6 @@ pub fn embedded_string(file_name: &str) -> anyhow::Result<&'static str> {
     std::str::from_utf8(bytes).map_err(|e| anyhow!("embedded asset {file_name} is not UTF-8: {e}"))
 }
 
-/// Where an asset's bytes came from.
-///
-/// Borrows when embedded and owns when read from disk, so resolving an embedded asset stays
-/// allocation free.
 pub enum Source {
     Disk(Vec<u8>),
     Embedded(&'static [u8]),
@@ -58,8 +53,6 @@ impl Source {
     }
 }
 
-/// Reports where the bytes came from and how many there are, rather than the bytes themselves,
-/// which for a model run to megabytes.
 impl std::fmt::Debug for Source {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let origin = if self.is_disk() { "disk" } else { "embedded" };
@@ -67,11 +60,6 @@ impl std::fmt::Debug for Source {
     }
 }
 
-/// Resolves `path` to bytes, preferring a real file and falling back to the embedded table.
-///
-/// A relative `path` is taken relative to `base_dir` when one is given, which is how a scene
-/// file refers to a model sitting next to it. Reading from disk is native only; on wasm there
-/// is no filesystem, so only the embedded table is consulted.
 pub fn resolve(base_dir: Option<&Path>, path: &str) -> anyhow::Result<Source> {
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -82,7 +70,6 @@ pub fn resolve(base_dir: Option<&Path>, path: &str) -> anyhow::Result<Source> {
 
         match std::fs::read(&candidate) {
             Ok(bytes) => return Ok(Source::Disk(bytes)),
-            // Not on disk is not an error: the name may refer to an embedded asset.
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => {
                 return Err(anyhow!("cannot read {}: {e}", candidate.display()));
@@ -90,8 +77,6 @@ pub fn resolve(base_dir: Option<&Path>, path: &str) -> anyhow::Result<Source> {
         }
     }
 
-    // The embedded table is keyed by bare file name, so a path like "models/cube.glb" still
-    // finds the asset embedded as "cube.glb".
     let name = file_name(path);
     match embedded(name) {
         Ok(bytes) => Ok(Source::Embedded(bytes)),
@@ -105,7 +90,6 @@ pub fn resolve(base_dir: Option<&Path>, path: &str) -> anyhow::Result<Source> {
     }
 }
 
-/// The final component of a `/`-separated path.
 fn file_name(path: &str) -> &str {
     path.rsplit_once('/').map_or(path, |(_, name)| name)
 }
@@ -137,7 +121,6 @@ fn extension(file_name: &str) -> Option<String> {
     Some(extension.to_ascii_lowercase())
 }
 
-/// Loads a model named relative to the embedded asset table.
 pub async fn load_model(
     file_name: &str,
     device: &wgpu::Device,
@@ -147,7 +130,6 @@ pub async fn load_model(
     load_model_from(None, file_name, device, queue, layout).await
 }
 
-/// Loads a model, looking for it on disk relative to `base_dir` before the embedded table.
 pub async fn load_model_from(
     base_dir: Option<&Path>,
     path: &str,
@@ -157,8 +139,6 @@ pub async fn load_model_from(
 ) -> anyhow::Result<model::Model> {
     let extension = extension(path);
 
-    // Checked before reading, so an unsupported format fails the same way whether or not the
-    // file happens to exist.
     match extension.as_deref() {
         Some("obj") | Some("gltf") | Some("glb") => {}
         Some(other) => {

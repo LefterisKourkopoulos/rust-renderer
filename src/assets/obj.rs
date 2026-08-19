@@ -9,11 +9,6 @@ use super::{embedded_string, load_normal_texture, load_texture};
 use crate::gfx::Texture;
 use crate::scene::model;
 
-/// Loads an OBJ from `bytes`.
-///
-/// Its `.mtl` and texture references are resolved against the embedded asset table, not the
-/// directory the OBJ came from, so only embedded OBJs load successfully. Hot reloading is
-/// `.glb` only for that reason.
 pub async fn load(
     bytes: &[u8],
     file_name: &str,

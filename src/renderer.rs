@@ -22,8 +22,6 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    /// Builds every pipeline from `layouts` alone, so the renderer is independent of any
-    /// particular scene and a scene swapped in later stays compatible.
     pub fn new(ctx: &GpuContext, layouts: &Layouts, config: RendererConfig) -> Self {
         let depth_texture =
             Texture::create_depth_texture(&ctx.device, &ctx.config, "depth_texture");

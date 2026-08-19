@@ -1,9 +1,3 @@
-//! The on-disk scene description and its translation into a [`SceneConfig`].
-//!
-//! Reading a scene from a file is what makes hot reloading possible at all: the configuration
-//! used to be hardcoded Rust, so changing the scene meant a rebuild. The format is native only,
-//! since wasm has no filesystem to read it from.
-
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, anyhow};
@@ -11,11 +5,6 @@ use serde::Deserialize;
 
 use crate::config::{CameraConfig, InstanceGridConfig, SceneConfig, SunConfig};
 
-/// The scene description as written on disk.
-///
-/// Every field is optional and falls back to the matching [`SceneConfig`] default, so a usable
-/// scene file can be a single `model = "..."` line. Unknown keys are rejected rather than
-/// ignored: silently skipping a typo would look exactly like a save that changed nothing.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SceneFile {
@@ -54,16 +43,10 @@ struct Grid {
     space_between: Option<f32>,
 }
 
-/// Reads and parses the scene file at `path`.
-///
-/// Relative asset paths inside it are resolved against its own directory, so a scene file and the
-/// `.glb` beside it can be moved around together.
 pub fn load(path: &Path) -> anyhow::Result<SceneConfig> {
     let text = std::fs::read_to_string(path)
         .with_context(|| format!("cannot read the scene file {}", path.display()))?;
 
-    // A scene file directly in the current directory has no parent component, so fall back to
-    // "." rather than to "no base directory at all", which would skip the disk entirely.
     let base_dir = match path.parent() {
         Some(parent) if parent.as_os_str().is_empty() => PathBuf::from("."),
         Some(parent) => parent.to_path_buf(),
@@ -73,7 +56,6 @@ pub fn load(path: &Path) -> anyhow::Result<SceneConfig> {
     parse(&text, Some(base_dir)).with_context(|| format!("in scene file {}", path.display()))
 }
 
-/// Parses a scene description, resolving its relative paths against `base_dir`.
 pub fn parse(text: &str, base_dir: Option<PathBuf>) -> anyhow::Result<SceneConfig> {
     let file: SceneFile = toml::from_str(text)?;
     file.into_config(base_dir)
@@ -142,18 +124,11 @@ impl Grid {
     }
 }
 
-/// Rejects the values that would otherwise fail deep inside the renderer, where the message no
-/// longer points back at the line of the scene file that caused it.
-///
-/// Worth being strict about on a hot reload path: a rejected file leaves the previous scene on
-/// screen with an explanation, whereas a NaN or an empty draw call just looks broken.
 fn validate(config: &SceneConfig) -> anyhow::Result<()> {
     if config.model_file.trim().is_empty() {
         return Err(anyhow!("model must name a file"));
     }
 
-    // Each of these checks the *positive* condition and negates the whole thing, so a NaN — which
-    // compares false against everything — is rejected rather than slipping through.
     let camera = &config.camera;
     if !(camera.znear.is_finite() && camera.znear > 0.0) {
         return Err(anyhow!(
@@ -188,8 +163,6 @@ fn validate(config: &SceneConfig) -> anyhow::Result<()> {
         ));
     }
 
-    // A zero direction has no normalized form, so the sun would light nothing and the shadow
-    // cascades would be built from a degenerate basis.
     let sun = &config.sun;
     if sun.direction.iter().all(|v| *v == 0.0) {
         return Err(anyhow!(
@@ -219,8 +192,6 @@ fn validate(config: &SceneConfig) -> anyhow::Result<()> {
         ));
     }
 
-    // Only used when the model brings no placements of its own, but a zero here would produce an
-    // empty instance buffer, which wgpu rejects outright.
     if config.grid.instances_per_row == 0 {
         return Err(anyhow!("grid.instances_per_row must be at least 1"));
     }
@@ -371,7 +342,6 @@ mod tests {
 
     #[test]
     fn a_nan_is_rejected_rather_than_propagating_into_every_matrix() {
-        // TOML has no NaN literal, so it arrives via an expression that evaluates to one.
         assert!(
             parse("[camera]\nznear = nan", None).is_err(),
             "a NaN near plane would make every projected vertex NaN"

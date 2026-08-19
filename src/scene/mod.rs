@@ -37,11 +37,6 @@ struct DiffuseOverride {
 }
 
 impl Scene {
-    /// Builds a scene from `config`.
-    ///
-    /// Takes a [`GpuHandle`] rather than the full [`GpuContext`](crate::gfx::GpuContext) so it can
-    /// run on a background thread while the previous scene keeps rendering; the surface stays on
-    /// the main thread with the window.
     pub async fn new(
         ctx: &GpuHandle,
         config: &SceneConfig,

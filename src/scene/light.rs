@@ -175,8 +175,6 @@ impl LightCollection {
             lights,
             animate,
             buffer,
-            // Kept so `add` can rebuild the bind group against the very same layout the
-            // pipelines were created with.
             bind_group_layout: layout.clone(),
             bind_group,
             vertex_buffer,

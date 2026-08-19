@@ -36,7 +36,6 @@ pub enum Action {
     ToggleDepthDebug,
     ToggleCascadeDebug,
     CycleShadowLayer,
-    /// Rebuild the scene from its file, whether or not the file changed.
     ReloadScene,
     MoveCamera {
         direction: CameraMove,
@@ -76,16 +75,10 @@ fn action_for_key(key_code: KeyCode, is_pressed: bool) -> Option<Action> {
 pub struct Engine {
     window: Arc<Window>,
     ctx: GpuContext,
-    /// Owned above both the scene and the renderer, so the two agree on bind group layouts
-    /// even after the scene is replaced.
-    ///
-    /// Only ever read to hand to a reload, which wasm has none of.
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     layouts: Layouts,
     renderer: Renderer,
     scene: Scene,
-    /// Rebuilds the scene on a worker thread. Absent when no scene file was given, in which case
-    /// the built-in scene is all there is and there is nothing to reload from.
     #[cfg(not(target_arch = "wasm32"))]
     loader: Option<SceneLoader>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -94,10 +87,6 @@ pub struct Engine {
 }
 
 impl Engine {
-    /// Builds the engine, loading the scene from `scene_path` when one is given.
-    ///
-    /// Without a scene path the built-in default scene is used and hot reloading is off, which is
-    /// the only mode wasm has.
     pub async fn new(
         window: Arc<Window>,
         #[cfg(not(target_arch = "wasm32"))] scene_path: Option<PathBuf>,
@@ -107,8 +96,6 @@ impl Engine {
 
         #[cfg(not(target_arch = "wasm32"))]
         let config = match &scene_path {
-            // A broken scene file at startup is fatal: there is no previous scene to fall back to,
-            // and silently rendering the default instead would hide the mistake.
             Some(path) => crate::scene_file::load(path)?,
             None => SceneConfig::default(),
         };
@@ -122,7 +109,6 @@ impl Engine {
         let (loader, watcher) = match scene_path {
             Some(path) => {
                 let loader = SceneLoader::new(ctx.handle(), path.clone());
-                // A failed watch costs the automatic reload, not the whole renderer: R still works.
                 let watcher = match SceneWatcher::new(&path) {
                     Ok(watcher) => Some(watcher),
                     Err(e) => {
@@ -195,10 +181,6 @@ impl Engine {
         log::info!("hot reloading is native only: wasm has no filesystem to reload from");
     }
 
-    /// Starts a reload if the scene file was saved, and swaps in a finished one.
-    ///
-    /// A failed load is reported and discarded: the scene already on screen stays, which is what
-    /// makes it safe to save a half-written file while the renderer is running.
     #[cfg(not(target_arch = "wasm32"))]
     fn poll_reload(&mut self) {
         if self.watcher.as_mut().is_some_and(SceneWatcher::poll) {
@@ -212,8 +194,6 @@ impl Engine {
         match loaded {
             Loaded::Scene(scene) => {
                 self.scene = *scene;
-                // The loader built the camera against a snapshot of the surface configuration, so
-                // a resize during the load would leave the projection stretched.
                 self.scene
                     .resize(self.ctx.config.width, self.ctx.config.height);
                 log::info!("scene reloaded");
@@ -246,7 +226,6 @@ impl Engine {
 pub struct App {
     #[cfg(target_arch = "wasm32")]
     proxy: Option<winit::event_loop::EventLoopProxy<Engine>>,
-    /// The scene file to load and watch, or `None` for the built-in scene.
     #[cfg(not(target_arch = "wasm32"))]
     scene_path: Option<PathBuf>,
     engine: Option<Engine>,
@@ -301,8 +280,6 @@ impl ApplicationHandler<Engine> for App {
             match pollster::block_on(Engine::new(window, scene_path)) {
                 Ok(engine) => self.engine = Some(engine),
                 Err(e) => {
-                    // Usually a broken scene file. Exiting with the reason beats panicking with a
-                    // backtrace that says nothing about which key was wrong.
                     log::error!("{e:#}");
                     event_loop.exit();
                 }
@@ -406,16 +383,9 @@ fn grab_cursor(window: &Window) {
     }
 }
 
-/// The scene file used when `--scene` is not given, if it exists.
-///
-/// Defaulting to it means `cargo run` in a checkout gets a hot-reloadable scene with no arguments,
-/// while a copy of the binary on its own still starts from the embedded scene.
 #[cfg(not(target_arch = "wasm32"))]
 const DEFAULT_SCENE: &str = "scenes/default.toml";
 
-/// The scene file to use, from `--scene <path>` or the default.
-///
-/// A `--scene` that was asked for explicitly must exist; the default is allowed not to.
 #[cfg(not(target_arch = "wasm32"))]
 fn scene_path_from_args() -> anyhow::Result<Option<PathBuf>> {
     let mut args = std::env::args_os().skip(1);

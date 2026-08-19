@@ -12,7 +12,6 @@ use crate::scene::model;
 
 const FLAT_NORMAL: [u8; 4] = [128, 128, 255, 255];
 
-/// Loads a glTF or GLB from `bytes`. `file_name` only labels resources and error messages.
 pub fn load(
     bytes: &[u8],
     file_name: &str,

@@ -1,13 +1,5 @@
 use crate::gfx::texture::Texture;
 
-/// Every bind group layout the renderer's pipelines are built against.
-///
-/// These outlive any individual [`Scene`](crate::scene::Scene): a pipeline validates its bind
-/// groups by pointer identity, so a scene that is swapped in at runtime has to bind groups made
-/// from the *same* layout objects the pipelines were created with. Owning them here, above both
-/// the scene and the renderer, is what makes that swap legal.
-///
-/// Cloning is cheap and shares the underlying layout, so a clone stays compatible.
 #[derive(Clone)]
 pub struct Layouts {
     pub material: wgpu::BindGroupLayout,

@@ -147,11 +147,7 @@ impl Default for InstanceGridConfig {
 pub struct SceneConfig {
     pub camera: CameraConfig,
     pub grid: InstanceGridConfig,
-    /// The model to draw, resolved against [`base_dir`](Self::base_dir) before the embedded
-    /// asset table.
     pub model_file: String,
-    /// The directory relative paths are resolved against, normally the one holding the scene
-    /// file. `None` restricts the scene to embedded assets, which is what wasm gets.
     pub base_dir: Option<PathBuf>,
     pub light_intensity_scale: f32,
     pub sun: SunConfig,

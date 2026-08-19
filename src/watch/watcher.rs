@@ -1,5 +1,3 @@
-//! Watching the scene file for saves.
-
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
@@ -8,26 +6,13 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, anyhow};
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
-/// A save produces several filesystem events in quick succession, and an editor writing atomically
-/// produces a *remove* followed by a *create* of a different inode. Coalescing over a short window
-/// turns that into one reload, and also gives a slow writer time to finish before the file is read.
 const DEBOUNCE: Duration = Duration::from_millis(150);
 
-/// Watches a scene file and reports when it has been saved.
-///
-/// Watches the file's **parent directory**, not the file itself: most editors save by writing a
-/// temporary file and renaming it over the target, which replaces the inode and silently detaches
-/// a watch registered on the original file. The directory outlives every such rename.
 pub struct SceneWatcher {
-    // Dropping the watcher unregisters it, so it has to be kept alive even though nothing reads it.
     _watcher: RecommendedWatcher,
     events: Receiver<notify::Result<Event>>,
-    /// The watched directory with every symlink resolved, so it compares equal to the paths
-    /// notify reports.
     directory: PathBuf,
-    /// The scene file's own name within [`directory`](Self::directory).
     file_name: OsString,
-    /// When set, a change has been seen and is waiting out the debounce window.
     changed_at: Option<Instant>,
 }
 
@@ -45,21 +30,14 @@ impl SceneWatcher {
             parent
         };
 
-        // Canonicalized, not merely made absolute. notify resolves symlinks in the paths it
-        // reports, and on macOS the temporary and home directories routinely sit behind one
-        // (/var -> /private/var), so a lexically absolute path would never compare equal to an
-        // event's and every save would be silently ignored.
         let directory = std::fs::canonicalize(parent)
             .with_context(|| format!("cannot watch the directory {}", parent.display()))?;
 
         let (sender, events) = channel();
         let mut watcher = notify::recommended_watcher(move |event| {
-            // The receiver is dropped on shutdown; losing events at that point is fine.
             let _ = sender.send(event);
         })?;
 
-        // Non-recursive: a scene directory may sit next to large asset trees, and recursing into
-        // them would cost watches on files no reload ever depends on.
         watcher.watch(&directory, RecursiveMode::NonRecursive)?;
 
         Ok(Self {
@@ -71,10 +49,6 @@ impl SceneWatcher {
         })
     }
 
-    /// Whether the scene file has changed and settled. Never blocks.
-    ///
-    /// Call once per frame: it drains pending events, then reports `true` only after the debounce
-    /// window has elapsed with no further change.
     pub fn poll(&mut self) -> bool {
         loop {
             match self.events.try_recv() {
@@ -98,12 +72,6 @@ impl SceneWatcher {
         }
     }
 
-    /// Whether `event` touches the scene file itself.
-    ///
-    /// The watch is on the whole directory, so unrelated files in it show up here too. Matched on
-    /// the file name within the watched directory rather than on the full path: an atomic save
-    /// deletes and recreates the file, so it cannot be canonicalized at the moment the event about
-    /// it arrives, but its directory can.
     fn concerns_the_scene(&self, event: &Event) -> bool {
         if !is_content_change(event.kind) {
             return false;
@@ -118,32 +86,21 @@ impl SceneWatcher {
         }
 
         match path.parent() {
-            // Already resolved when it comes from notify; canonicalizing again is what makes the
-            // comparison work for a path assembled by hand, as the tests do.
             Some(parent) => resolved(parent) == self.directory,
             None => false,
         }
     }
 }
 
-/// `path` with symlinks resolved where possible, falling back to a lexically absolute form.
-///
-/// The fallback matters for a directory that has since been deleted: it cannot be canonicalized,
-/// and treating that as "matches everything" would be worse than not matching.
 fn resolved(path: &Path) -> PathBuf {
     std::fs::canonicalize(path)
         .or_else(|_| std::path::absolute(path))
         .unwrap_or_else(|_| path.to_path_buf())
 }
 
-/// Whether this kind of event can mean the file's contents are now different.
-///
-/// Metadata-only changes are excluded: a `chmod` or an access-time update is not a save, and
-/// reloading on one would rebuild the scene for nothing.
 fn is_content_change(kind: EventKind) -> bool {
     match kind {
         EventKind::Create(_) | EventKind::Remove(_) => true,
-        // A rename-into-place arrives as a Modify(Name) rather than a Create on some platforms.
         EventKind::Modify(notify::event::ModifyKind::Metadata(_)) => false,
         EventKind::Modify(_) => true,
         EventKind::Any | EventKind::Other => true,
@@ -197,7 +154,6 @@ mod tests {
         assert!(!is_content_change(EventKind::Access(AccessKind::Read)));
     }
 
-    /// A scratch directory plus a scene file in it, and a watcher on that file.
     fn watcher_on(name: &str) -> (PathBuf, PathBuf, SceneWatcher) {
         let dir = std::env::temp_dir().join(format!("rust-renderer-watch-{name}"));
         std::fs::create_dir_all(&dir).expect("create the temp dir");
@@ -226,8 +182,6 @@ mod tests {
     fn an_event_about_the_scene_file_is_recognised_through_an_unresolved_path() {
         let (dir, path, watcher) = watcher_on("unresolved");
 
-        // dir is /var/... on macOS while the watcher stored /private/var/..., which is exactly the
-        // mismatch that made saves go unnoticed.
         let mut event = Event::new(EventKind::Modify(ModifyKind::Data(DataChange::Content)));
         event.paths.push(dir.join("scene.toml"));
 
