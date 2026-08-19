@@ -46,15 +46,8 @@ impl HdrPipeline {
 
         let pipeline = pipeline::create_render_pipeline(
             device,
-            &RenderPipelineConfig {
-                label: "Hdr Pipeline",
-                bind_group_layouts: &[&layout],
-                shader: &shader,
-                vertex_buffers: &[],
-                color_format: config.format,
-                depth_write: false,
-                topology: wgpu::PrimitiveTopology::TriangleList,
-            },
+            &RenderPipelineConfig::new("Hdr Pipeline", &[&layout], &shader, config.format)
+                .depth_write(false),
         );
 
         Self {

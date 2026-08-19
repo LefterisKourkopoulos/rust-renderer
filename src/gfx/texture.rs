@@ -336,6 +336,64 @@ impl Texture {
         }
     }
 
+    pub fn create_depth_array(
+        device: &wgpu::Device,
+        resolution: u32,
+        layers: u32,
+        label: &str,
+    ) -> Self {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(label),
+            size: wgpu::Extent3d {
+                width: resolution,
+                height: resolution,
+                depth_or_array_layers: layers.max(1),
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: Self::DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some(label),
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        });
+
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some(label),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            compare: Some(wgpu::CompareFunction::LessEqual),
+            ..Default::default()
+        });
+
+        Self {
+            texture,
+            view,
+            sampler,
+        }
+    }
+
+    pub fn depth_layer_view(&self, layer: u32, label: &str) -> wgpu::TextureView {
+        self.texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some(label),
+            dimension: Some(wgpu::TextureViewDimension::D2),
+            base_array_layer: layer,
+            array_layer_count: Some(1),
+            ..Default::default()
+        })
+    }
+
     pub fn create_depth_texture(
         device: &wgpu::Device,
         config: &wgpu::SurfaceConfiguration,

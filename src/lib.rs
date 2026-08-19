@@ -5,6 +5,7 @@ pub mod debug;
 pub mod gfx;
 pub mod renderer;
 pub mod scene;
+pub mod shadow;
 
 pub use app::{Action, App, Engine, run};
 pub use config::{CameraConfig, InstanceGridConfig, PipelineMode, RendererConfig, SceneConfig};

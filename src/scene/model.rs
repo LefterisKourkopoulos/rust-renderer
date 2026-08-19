@@ -120,6 +120,7 @@ pub trait DrawModel<'a> {
         material: &'a Material,
         camera_bind_group: &'a wgpu::BindGroup,
         light_bind_group: &'a wgpu::BindGroup,
+        shadow_bind_group: &'a wgpu::BindGroup,
     );
 
     fn draw_mesh_instanced(
@@ -130,6 +131,7 @@ pub trait DrawModel<'a> {
         camera_bind_group: &'a wgpu::BindGroup,
         diffuse_override: Option<&'a wgpu::BindGroup>,
         light_bind_group: &'a wgpu::BindGroup,
+        shadow_bind_group: &'a wgpu::BindGroup,
     );
 
     fn draw_model(
@@ -137,6 +139,7 @@ pub trait DrawModel<'a> {
         model: &'a Model,
         camera_bind_group: &'a wgpu::BindGroup,
         light_bind_group: &'a wgpu::BindGroup,
+        shadow_bind_group: &'a wgpu::BindGroup,
     );
 
     fn draw_model_instanced(
@@ -146,7 +149,10 @@ pub trait DrawModel<'a> {
         camera_bind_group: &'a wgpu::BindGroup,
         diffuse_override: Option<&'a wgpu::BindGroup>,
         light_bind_group: &'a wgpu::BindGroup,
+        shadow_bind_group: &'a wgpu::BindGroup,
     );
+
+    fn draw_model_depth(&mut self, model: &'a Model, instances: Range<u32>);
 }
 
 impl<'a, 'b> DrawModel<'b> for wgpu::RenderPass<'a>
@@ -159,8 +165,17 @@ where
         material: &'b Material,
         camera_bind_group: &'b wgpu::BindGroup,
         light_bind_group: &'a wgpu::BindGroup,
+        shadow_bind_group: &'a wgpu::BindGroup,
     ) {
-        self.draw_mesh_instanced(mesh, material, 0..1, camera_bind_group, None, light_bind_group);
+        self.draw_mesh_instanced(
+            mesh,
+            material,
+            0..1,
+            camera_bind_group,
+            None,
+            light_bind_group,
+            shadow_bind_group,
+        );
     }
 
     fn draw_mesh_instanced(
@@ -171,12 +186,14 @@ where
         camera_bind_group: &'b wgpu::BindGroup,
         diffuse_override: Option<&'b wgpu::BindGroup>,
         light_bind_group: &'a wgpu::BindGroup,
+        shadow_bind_group: &'a wgpu::BindGroup,
     ) {
         self.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
         self.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         self.set_bind_group(0, diffuse_override.unwrap_or(&material.bind_group), &[]);
         self.set_bind_group(1, camera_bind_group, &[]);
         self.set_bind_group(2, light_bind_group, &[]);
+        self.set_bind_group(3, shadow_bind_group, &[]);
         self.draw_indexed(0..mesh.num_elements, 0, instances);
     }
 
@@ -185,8 +202,16 @@ where
         model: &'a Model,
         camera_bind_group: &'a wgpu::BindGroup,
         light_bind_group: &'a wgpu::BindGroup,
+        shadow_bind_group: &'a wgpu::BindGroup,
     ) {
-        self.draw_model_instanced(model, 0..1, camera_bind_group,  None, light_bind_group);
+        self.draw_model_instanced(
+            model,
+            0..1,
+            camera_bind_group,
+            None,
+            light_bind_group,
+            shadow_bind_group,
+        );
     }
 
     fn draw_model_instanced(
@@ -196,6 +221,7 @@ where
         camera_bind_group: &'b wgpu::BindGroup,
         diffuse_override: Option<&'b wgpu::BindGroup>,
         light_bind_group: &'a wgpu::BindGroup,
+        shadow_bind_group: &'a wgpu::BindGroup,
     ) {
         for mesh in &model.meshes {
             let material = &model.materials[mesh.material];
@@ -206,8 +232,18 @@ where
                 range,
                 camera_bind_group,
                 diffuse_override,
-                light_bind_group
+                light_bind_group,
+                shadow_bind_group,
             );
+        }
+    }
+
+    fn draw_model_depth(&mut self, model: &'b Model, instances: Range<u32>) {
+        for mesh in &model.meshes {
+            let range = mesh.instances.clone().unwrap_or_else(|| instances.clone());
+            self.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+            self.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            self.draw_indexed(0..mesh.num_elements, 0, range);
         }
     }
 }

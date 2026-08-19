@@ -30,6 +30,8 @@ pub enum Action {
     Exit,
     CycleDiffuse,
     ToggleDepthDebug,
+    ToggleCascadeDebug,
+    CycleShadowLayer,
     MoveCamera {
         direction: CameraMove,
         is_pressed: bool,
@@ -52,6 +54,8 @@ fn action_for_key(key_code: KeyCode, is_pressed: bool) -> Option<Action> {
         KeyCode::Escape if is_pressed => Some(Action::Exit),
         KeyCode::KeyC if is_pressed => Some(Action::CycleDiffuse),
         KeyCode::KeyF if is_pressed => Some(Action::ToggleDepthDebug),
+        KeyCode::KeyG if is_pressed => Some(Action::ToggleCascadeDebug),
+        KeyCode::KeyH if is_pressed => Some(Action::CycleShadowLayer),
         KeyCode::KeyW | KeyCode::ArrowUp => movement(CameraMove::Forward),
         KeyCode::KeyS | KeyCode::ArrowDown => movement(CameraMove::Backward),
         KeyCode::KeyA | KeyCode::ArrowLeft => movement(CameraMove::Left),
@@ -100,6 +104,8 @@ impl Engine {
             Action::Exit => {}
             Action::CycleDiffuse => self.scene.cycle_diffuse(),
             Action::ToggleDepthDebug => self.renderer.toggle_depth_debug(),
+            Action::ToggleCascadeDebug => self.renderer.toggle_cascade_debug(),
+            Action::CycleShadowLayer => self.renderer.cycle_shadow_layer(&self.ctx),
             Action::MoveCamera {
                 direction,
                 is_pressed,
@@ -118,6 +124,7 @@ impl Engine {
         self.last_update = now;
 
         self.scene.update(&self.ctx.queue, dt.as_secs_f32());
+        self.renderer.update(&self.ctx, &self.scene);
     }
 
     fn render(&mut self) -> anyhow::Result<()> {

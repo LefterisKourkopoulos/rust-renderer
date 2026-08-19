@@ -100,15 +100,15 @@ impl Scene {
                 usage: wgpu::BufferUsages::VERTEX,
             });
 
-        let (lights, animate) = if obj_model.lights.is_empty() {
+        let (mut lights, animate) = if obj_model.lights.is_empty() {
             let fallback = vec![
                 // Intensity 20 compensates for the inverse square falloff the shader now applies:
                 // at the grid's 3-4 unit light distance that costs roughly a factor of 12, so this
                 // keeps the demo grid about as bright as it was before attenuation existed.
-                Light::new([2.0, 2.0, 2.0], [1.0, 0.0, 0.0]).with_intensity(20.0),
-                Light::new([-2.0, 2.0, 2.0], [0.0, 1.0, 0.0]).with_intensity(20.0),
-                Light::new([2.0, 2.0, -2.0], [0.0, 0.0, 1.0]).with_intensity(20.0),
-                Light::new([-2.0, 2.0, -2.0], [1.0, 1.0, 1.0]).with_intensity(20.0),
+                //Light::new([2.0, 2.0, 2.0], [1.0, 0.0, 0.0]).with_intensity(20.0),
+                //Light::new([-2.0, 2.0, 2.0], [0.0, 1.0, 0.0]).with_intensity(20.0),
+                //Light::new([2.0, 2.0, -2.0], [0.0, 0.0, 1.0]).with_intensity(20.0),
+                //Light::new([-2.0, 2.0, -2.0], [1.0, 1.0, 1.0]).with_intensity(20.0),
             ];
             (fallback, true)
         } else {
@@ -122,6 +122,16 @@ impl Scene {
                 .collect();
             (scaled, false)
         };
+
+        lights.insert(
+            0,
+            Light::directional(
+                config.sun.direction,
+                config.sun.color,
+                config.sun.intensity,
+            ),
+        );
+
         let lights = LightCollection::new(&ctx.device, lights, animate);
 
         // Skybox

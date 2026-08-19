@@ -8,6 +8,7 @@ pub enum PipelineMode {
 pub struct RendererConfig {
     pub clear_color: wgpu::Color,
     pub pipeline_mode: PipelineMode,
+    pub shadows: ShadowConfig,
 }
 
 impl Default for RendererConfig {
@@ -20,6 +21,67 @@ impl Default for RendererConfig {
                 a: 1.0,
             },
             pipeline_mode: PipelineMode::default(),
+            shadows: ShadowConfig::default(),
+        }
+    }
+}
+
+pub const MAX_CASCADES: usize = 4;
+
+#[derive(Clone)]
+pub struct ShadowConfig {
+    pub enabled: bool,
+    pub cascade_count: usize,
+    pub resolution: u32,
+    pub split_lambda: f32,
+    pub z_mult: f32,
+    pub depth_bias: i32,
+    pub depth_bias_slope: f32,
+    pub normal_offset: f32,
+    pub near: f32,
+    pub far: f32,
+}
+
+impl Default for ShadowConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            cascade_count: MAX_CASCADES,
+            resolution: 2048,
+            split_lambda: 0.7,
+            z_mult: 10.0,
+            depth_bias: 2,
+            depth_bias_slope: 2.0,
+            normal_offset: 0.02,
+            near: 0.1,
+            far: 30.0,
+        }
+    }
+}
+
+impl ShadowConfig {
+    pub fn cascade_count(&self) -> usize {
+        self.cascade_count.clamp(1, MAX_CASCADES)
+    }
+
+    pub fn range(&self, znear: f32, zfar: f32) -> (f32, f32) {
+        let near = self.near.max(znear);
+        (near, self.far.clamp(near + 1e-3, zfar))
+    }
+}
+
+pub struct SunConfig {
+    pub direction: [f32; 3],
+    pub color: [f32; 3],
+    pub intensity: f32,
+}
+
+impl Default for SunConfig {
+    fn default() -> Self {
+        Self {
+            direction: [-0.4, -1.0, -0.3],
+            color: [1.0, 0.98, 0.92],
+            intensity: 1.5,
         }
     }
 }
@@ -81,6 +143,7 @@ pub struct SceneConfig {
     pub grid: InstanceGridConfig,
     pub model_file: &'static str,
     pub light_intensity_scale: f32,
+    pub sun: SunConfig,
 }
 
 impl Default for SceneConfig {
@@ -90,6 +153,7 @@ impl Default for SceneConfig {
             grid: InstanceGridConfig::default(),
             model_file: "cube_diorama.glb",
             light_intensity_scale: 0.005,
+            sun: SunConfig::default(),
         }
     }
 }

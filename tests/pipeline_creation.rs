@@ -1,6 +1,8 @@
 use rust_renderer::Vertex;
+use rust_renderer::config::ShadowConfig;
 use rust_renderer::scene::instance::InstanceRaw;
 use rust_renderer::scene::model::ModelVertex;
+use rust_renderer::shadow::ShadowPass;
 use rust_renderer::{Texture, gfx};
 
 fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
@@ -80,25 +82,40 @@ fn the_scene_pipeline_builds_against_the_real_shader() {
         }],
     });
 
+    let shadow_layout = ShadowPass::bind_group_layout(&device);
+
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Shader"),
-        source: wgpu::ShaderSource::Wgsl(
-            include_str!("../src/shaders/shader.wgsl").into(),
-        ),
+        source: wgpu::ShaderSource::Wgsl(include_str!("../src/shaders/shader.wgsl").into()),
     });
 
     let _pipeline = gfx::create_render_pipeline(
         &device,
-        &gfx::pipeline::RenderPipelineConfig {
-            label: "Render Pipeline",
-            bind_group_layouts: &[&material_layout, &camera_layout, &light_layout],
-            shader: &shader,
-            vertex_buffers: &[ModelVertex::desc(), InstanceRaw::desc()],
-            color_format: wgpu::TextureFormat::Bgra8UnormSrgb,
-            depth_write: true,
-            topology: wgpu::PrimitiveTopology::TriangleList,
-        },
+        &gfx::pipeline::RenderPipelineConfig::new(
+            "Render Pipeline",
+            &[
+                &material_layout,
+                &camera_layout,
+                &light_layout,
+                &shadow_layout,
+            ],
+            &shader,
+            wgpu::TextureFormat::Bgra8UnormSrgb,
+        )
+        .vertex_buffers(&[ModelVertex::desc(), InstanceRaw::desc()]),
     );
+
+    wait(&device);
+}
+
+#[test]
+fn the_shadow_pass_builds_against_the_real_shader() {
+    let Some((device, _queue)) = device() else {
+        eprintln!("no GPU adapter available; skipping");
+        return;
+    };
+
+    let _shadow = ShadowPass::new(&device, ShadowConfig::default());
 
     wait(&device);
 }

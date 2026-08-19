@@ -44,15 +44,13 @@ impl DepthDebug {
 
         let render_pipeline = pipeline::create_render_pipeline(
             device,
-            &RenderPipelineConfig {
-                label: "Depth Debug Pipeline",
-                bind_group_layouts: &[&bind_group_layout],
-                shader: &shader,
-                vertex_buffers: &[],
+            &RenderPipelineConfig::new(
+                "Depth Debug Pipeline",
+                &[&bind_group_layout],
+                &shader,
                 color_format,
-                depth_write: false,
-                topology: wgpu::PrimitiveTopology::TriangleList,
-            },
+            )
+            .depth_write(false),
         );
 
         Self {

@@ -59,6 +59,14 @@ impl Projection {
     }
 }
 
+#[derive(Copy, Clone, Debug)]
+pub struct FrustumParams {
+    pub fovy: cgmath::Rad<f32>,
+    pub aspect: f32,
+    pub znear: f32,
+    pub zfar: f32,
+}
+
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct CameraUniform {
@@ -254,6 +262,19 @@ impl CameraState {
 
     pub fn bind_group_layout(&self) -> &wgpu::BindGroupLayout {
         &self.bind_group_layout
+    }
+
+    pub fn view(&self) -> cgmath::Matrix4<f32> {
+        self.camera.calc_matrix()
+    }
+
+    pub fn frustum(&self) -> FrustumParams {
+        FrustumParams {
+            fovy: self.projection.fovy,
+            aspect: self.projection.aspect,
+            znear: self.projection.znear,
+            zfar: self.projection.zfar,
+        }
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {

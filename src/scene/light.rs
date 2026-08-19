@@ -51,6 +51,17 @@ impl Light {
         self.intensity = intensity;
         self
     }
+
+    pub fn directional(direction: [f32; 3], color: [f32; 3], intensity: f32) -> Self {
+        Self {
+            position: [0.0; 3],
+            direction,
+            color,
+            intensity,
+            range: 0.0,
+            kind: LightKind::Directional,
+        }
+    }
 }
 
 #[repr(C)]
@@ -187,6 +198,13 @@ impl LightCollection {
         self.lights.len() as u32
     }
 
+    pub fn directional(&self) -> Option<Light> {
+        self.lights
+            .iter()
+            .find(|light| light.kind == LightKind::Directional)
+            .copied()
+    }
+
     pub fn add(&mut self, device: &wgpu::Device, light: Light) {
         self.lights.push(light);
         self.buffer = Self::create_buffer(device, &self.lights);
@@ -199,6 +217,10 @@ impl LightCollection {
         }
 
         for light in &mut self.lights {
+            if light.kind == LightKind::Directional {
+                continue;
+            }
+
             let old_position: cgmath::Vector3<f32> = light.position.into();
             light.position = (cgmath::Quaternion::from_axis_angle(
                 (0.0, 1.0, 0.0).into(),

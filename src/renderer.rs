@@ -1,9 +1,10 @@
 use crate::config::{PipelineMode, RendererConfig};
-use crate::debug::DepthDebug;
+use crate::debug::{CascadeDebug, DepthDebug};
 use crate::gfx::{GpuContext, HdrPipeline, Texture, Vertex, create_render_pipeline, pipeline};
 use crate::scene::Scene;
 use crate::scene::instance::InstanceRaw;
 use crate::scene::model::{DrawModel, ModelVertex};
+use crate::shadow::ShadowPass;
 
 pub struct Renderer {
     render_pipeline: wgpu::RenderPipeline,
@@ -11,6 +12,9 @@ pub struct Renderer {
     sky_pipeline: wgpu::RenderPipeline,
     depth_texture: Texture,
     depth_debug: DepthDebug,
+    cascade_debug: CascadeDebug,
+    shadow: ShadowPass,
+    cascade_tint: bool,
     hdr: Option<HdrPipeline>,
     config: RendererConfig,
 }
@@ -20,6 +24,14 @@ impl Renderer {
         let depth_texture =
             Texture::create_depth_texture(&ctx.device, &ctx.config, "depth_texture");
         let depth_debug = DepthDebug::new(&ctx.device, &depth_texture, ctx.config.format);
+
+        let shadow = ShadowPass::new(&ctx.device, config.shadows.clone());
+        let cascade_debug = CascadeDebug::new(
+            &ctx.device,
+            shadow.depth_view(),
+            shadow.cascade_count() as u32,
+            ctx.config.format,
+        );
 
         let hdr = match config.pipeline_mode {
             PipelineMode::Hdr => Some(HdrPipeline::new(&ctx.device, &ctx.config)),
@@ -40,19 +52,18 @@ impl Renderer {
 
         let render_pipeline = create_render_pipeline(
             &ctx.device,
-            &pipeline::RenderPipelineConfig {
-                label: "Render Pipeline",
-                bind_group_layouts: &[
+            &pipeline::RenderPipelineConfig::new(
+                "Render Pipeline",
+                &[
                     scene.texture_bind_group_layout(),
                     scene.camera.bind_group_layout(),
-                    &scene.lights.bind_group_layout
+                    &scene.lights.bind_group_layout,
+                    shadow.layout(),
                 ],
-                shader: &instance_shader,
-                vertex_buffers: &[ModelVertex::desc(), InstanceRaw::desc()],
+                &instance_shader,
                 color_format,
-                depth_write: true,
-                topology: wgpu::PrimitiveTopology::TriangleList,
-            },
+            )
+            .vertex_buffers(&[ModelVertex::desc(), InstanceRaw::desc()]),
         );
 
         // Light Rendering Pipeline
@@ -65,18 +76,16 @@ impl Renderer {
 
         let light_pipeline = create_render_pipeline(
             &ctx.device,
-            &pipeline::RenderPipelineConfig {
-                label: "Light Pipeline",
-                bind_group_layouts: &[
+            &pipeline::RenderPipelineConfig::new(
+                "Light Pipeline",
+                &[
                     scene.camera.bind_group_layout(),
-                    &scene.lights.bind_group_layout
+                    &scene.lights.bind_group_layout,
                 ],
-                shader: &light_shader,
-                vertex_buffers: &[ModelVertex::desc()],
+                &light_shader,
                 color_format,
-                depth_write: true,
-                topology: wgpu::PrimitiveTopology::TriangleList,
-            },
+            )
+            .vertex_buffers(&[ModelVertex::desc()]),
         );
 
         // Sky Rendering Pipeline
@@ -89,15 +98,15 @@ impl Renderer {
 
         let sky_pipeline = create_render_pipeline(
             &ctx.device,
-            &pipeline::RenderPipelineConfig {
-                label: "Sky Pipeline",
-                bind_group_layouts: &[scene.camera.bind_group_layout(), scene.environment_bind_group_layout()],
-                shader: &sky_shader,
-                vertex_buffers: &[],
+            &pipeline::RenderPipelineConfig::new(
+                "Sky Pipeline",
+                &[
+                    scene.camera.bind_group_layout(),
+                    scene.environment_bind_group_layout(),
+                ],
+                &sky_shader,
                 color_format,
-                depth_write: true,
-                topology: wgpu::PrimitiveTopology::TriangleList,
-            },
+            ),
         );
 
         Self {
@@ -106,6 +115,9 @@ impl Renderer {
             sky_pipeline,
             depth_texture,
             depth_debug,
+            cascade_debug,
+            shadow,
+            cascade_tint: false,
             hdr,
             config,
         }
@@ -124,6 +136,25 @@ impl Renderer {
         self.depth_debug.toggle();
     }
 
+    pub fn toggle_cascade_debug(&mut self) {
+        self.cascade_tint = !self.cascade_tint;
+        self.shadow.set_debug_mode(self.cascade_tint);
+    }
+
+    pub fn cycle_shadow_layer(&mut self, ctx: &GpuContext) {
+        self.cascade_debug.cycle(&ctx.queue);
+    }
+
+    pub fn update(&mut self, ctx: &GpuContext, scene: &Scene) {
+        if !self.config.shadows.enabled {
+            return;
+        }
+
+        if let Some(sun) = scene.lights.directional() {
+            self.shadow.update(&ctx.queue, &scene.camera, sun.direction);
+        }
+    }
+
     pub fn render(&mut self, ctx: &mut GpuContext, scene: &Scene) -> anyhow::Result<()> {
         let Some(output) = ctx.acquire_frame()? else {
             return Ok(());
@@ -140,6 +171,15 @@ impl Renderer {
             });
 
         let color_view = self.hdr.as_ref().map(HdrPipeline::view).unwrap_or(&view);
+
+        if self.config.shadows.enabled {
+            self.shadow.render(
+                &mut encoder,
+                &scene.obj_model,
+                &scene.instance_buffer,
+                scene.instances.len() as u32,
+            );
+        }
 
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -173,7 +213,8 @@ impl Renderer {
                 0..scene.instances.len() as u32,
                 scene.camera.bind_group(),
                 scene.diffuse_override(),
-                &scene.lights.bind_group
+                &scene.lights.bind_group,
+                self.shadow.bind_group(),
             );
 
             render_pass.set_pipeline(&self.light_pipeline);
@@ -190,6 +231,7 @@ impl Renderer {
         }
 
         self.depth_debug.draw(&mut encoder, &view);
+        self.cascade_debug.draw(&mut encoder, &view);
 
         if let Some(hdr) = &self.hdr {
             hdr.process(&mut encoder, &view);
