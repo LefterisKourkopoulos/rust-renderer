@@ -1895,6 +1895,7 @@ dependencies = [
  "env_logger",
  "gltf",
  "image",
+ "js-sys",
  "log",
  "notify",
  "pollster",

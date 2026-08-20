@@ -10,6 +10,8 @@ pub mod scene_file;
 pub mod shadow;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod watch;
+#[cfg(target_arch = "wasm32")]
+pub mod web;
 
 pub use app::{Action, App, Engine, run};
 pub use config::{CameraConfig, InstanceGridConfig, PipelineMode, RendererConfig, SceneConfig};
@@ -19,3 +21,5 @@ pub use scene::Scene;
 
 #[cfg(target_arch = "wasm32")]
 pub use app::run_web;
+#[cfg(target_arch = "wasm32")]
+pub use web::RendererHandle;

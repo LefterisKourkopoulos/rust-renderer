@@ -2,11 +2,13 @@ pub mod camera;
 pub mod instance;
 pub mod model;
 pub mod light;
+pub mod sun;
 
+use cgmath::SquareMatrix;
 use wgpu::util::DeviceExt;
 
 use crate::assets;
-use crate::config::SceneConfig;
+use crate::config::{InstanceGridConfig, SceneConfig};
 use crate::gfx::{CubeTexture, GpuHandle, HdrLoader, Layouts, Texture};
 use light::{Light, LightCollection};
 use camera::{CameraMove, CameraState};
@@ -34,6 +36,28 @@ struct DiffuseOverride {
     #[allow(dead_code)]
     uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+}
+
+/// The instances to draw for a freshly loaded model: the model's own baked transforms if it has
+/// any, else the demo grid (only meaningful for `Scene::new`'s own config-driven load), else a
+/// single instance at the origin.
+fn instances_for(model: &Model, grid: Option<&InstanceGridConfig>) -> Vec<Instance> {
+    if !model.instances.is_empty() {
+        model.instances.clone()
+    } else if let Some(grid) = grid {
+        Instance::grid(grid)
+    } else {
+        vec![Instance::from_matrix(cgmath::Matrix4::identity())]
+    }
+}
+
+fn build_instance_buffer(device: &wgpu::Device, instances: &[Instance]) -> wgpu::Buffer {
+    let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
+    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Instance Buffer"),
+        contents: bytemuck::cast_slice(&instance_data),
+        usage: wgpu::BufferUsages::VERTEX,
+    })
 }
 
 impl Scene {
@@ -85,19 +109,8 @@ impl Scene {
         )
         .await?;
 
-        let instances = if obj_model.instances.is_empty() {
-            Instance::grid(&config.grid)
-        } else {
-            obj_model.instances.clone()
-        };
-        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
-        let instance_buffer = ctx
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Instance Buffer"),
-                contents: bytemuck::cast_slice(&instance_data),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
+        let instances = instances_for(&obj_model, Some(&config.grid));
+        let instance_buffer = build_instance_buffer(&ctx.device, &instances);
 
         let (mut lights, animate) = if obj_model.lights.is_empty() {
             let fallback = vec![
@@ -170,6 +183,69 @@ impl Scene {
             sky_texture,
             environment_bind_group,
         })
+    }
+
+    /// Replaces the drawn model in place, loading `bytes` as a glTF/GLB file. Camera, lights
+    /// (including the sun), and skybox are left exactly as they were, so an uploaded model does
+    /// not clobber whatever time-of-day/skybox controls have already set. Any lights the file
+    /// itself declares are deliberately ignored here (unlike `Scene::new`'s fresh load), so the
+    /// independently controlled sun stays authoritative.
+    pub fn set_model(
+        &mut self,
+        ctx: &GpuHandle,
+        layouts: &Layouts,
+        bytes: &[u8],
+        file_name: &str,
+    ) -> anyhow::Result<()> {
+        let obj_model = assets::load_glb(bytes, file_name, &ctx.device, &ctx.queue, &layouts.material)?;
+        let instances = instances_for(&obj_model, None);
+        let instance_buffer = build_instance_buffer(&ctx.device, &instances);
+
+        self.obj_model = obj_model;
+        self.instances = instances;
+        self.instance_buffer = instance_buffer;
+
+        Ok(())
+    }
+
+    /// Replaces the skybox in place from an equirectangular image's bytes, without touching the
+    /// model, camera, or lights.
+    pub fn set_skybox(
+        &mut self,
+        ctx: &GpuHandle,
+        hdr_loader: &HdrLoader,
+        layouts: &Layouts,
+        bytes: &[u8],
+        label: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let sky_texture = hdr_loader.from_equirect_bytes(&ctx.device, &ctx.queue, bytes, 1080, label)?;
+
+        let environment_bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("environment_bind_group"),
+            layout: &layouts.environment,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(sky_texture.view()),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(sky_texture.sampler()),
+                },
+            ],
+        });
+
+        self.sky_texture = sky_texture;
+        self.environment_bind_group = environment_bind_group;
+
+        Ok(())
+    }
+
+    /// Moves the sun to match the given hour of day (0-24, wrapping), updating its direction,
+    /// color, and intensity in place. A no-op if the scene has no directional light.
+    pub fn set_time_of_day(&mut self, queue: &wgpu::Queue, hour: f32) {
+        let sun::SunState { direction, color, intensity } = sun::sun_for_hour(hour);
+        self.lights.set_directional(queue, direction, color, intensity);
     }
 
     pub fn environment_bind_group(&self) -> &wgpu::BindGroup {

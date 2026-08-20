@@ -194,6 +194,31 @@ impl LightCollection {
             .copied()
     }
 
+    /// Mutates the directional light in place (a no-op if none exists) and re-uploads the whole
+    /// buffer, without touching any other light or rebuilding the bind group.
+    pub fn set_directional(
+        &mut self,
+        queue: &wgpu::Queue,
+        direction: [f32; 3],
+        color: [f32; 3],
+        intensity: f32,
+    ) {
+        let Some(light) = self
+            .lights
+            .iter_mut()
+            .find(|light| light.kind == LightKind::Directional)
+        else {
+            return;
+        };
+
+        light.direction = direction;
+        light.color = color;
+        light.intensity = intensity;
+
+        let raw: Vec<LightRaw> = self.lights.iter().copied().map(LightRaw::from).collect();
+        queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&raw));
+    }
+
     pub fn add(&mut self, device: &wgpu::Device, light: Light) {
         self.lights.push(light);
         self.buffer = Self::create_buffer(device, &self.lights);

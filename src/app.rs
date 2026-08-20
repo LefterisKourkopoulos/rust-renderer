@@ -10,7 +10,7 @@ use winit::{
 };
 
 use crate::config::{RendererConfig, SceneConfig};
-use crate::gfx::{GpuContext, Layouts};
+use crate::gfx::{GpuContext, HdrLoader, Layouts};
 use crate::renderer::Renderer;
 use crate::scene::Scene;
 use crate::scene::camera::CameraMove;
@@ -28,6 +28,10 @@ use web_time::Instant;
 use wasm_bindgen::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use winit::platform::web::EventLoopExtWebSys;
+#[cfg(target_arch = "wasm32")]
+use std::cell::RefCell;
+#[cfg(target_arch = "wasm32")]
+use std::rc::Rc;
 
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum Action {
@@ -75,8 +79,8 @@ fn action_for_key(key_code: KeyCode, is_pressed: bool) -> Option<Action> {
 pub struct Engine {
     window: Arc<Window>,
     ctx: GpuContext,
-    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     layouts: Layouts,
+    hdr_loader: HdrLoader,
     renderer: Renderer,
     scene: Scene,
     #[cfg(not(target_arch = "wasm32"))]
@@ -93,6 +97,7 @@ impl Engine {
     ) -> anyhow::Result<Self> {
         let ctx = GpuContext::new(window.clone()).await?;
         let layouts = Layouts::new(&ctx.device);
+        let hdr_loader = HdrLoader::new(&ctx.device);
 
         #[cfg(not(target_arch = "wasm32"))]
         let config = match &scene_path {
@@ -129,6 +134,7 @@ impl Engine {
             window,
             ctx,
             layouts,
+            hdr_loader,
             renderer,
             scene,
             #[cfg(not(target_arch = "wasm32"))]
@@ -137,6 +143,31 @@ impl Engine {
             watcher,
             last_update: Instant::now(),
         })
+    }
+
+    /// Replaces the drawn model with the glTF/GLB file at `bytes`, leaving the camera, lights
+    /// (including the sun), and skybox untouched. This is the seam a browser upload or a preset
+    /// picker plugs into; see `Scene::set_model`.
+    pub fn load_glb(&mut self, bytes: &[u8], file_name: &str) -> anyhow::Result<()> {
+        self.scene
+            .set_model(&self.ctx.handle(), &self.layouts, bytes, file_name)
+    }
+
+    /// Replaces the skybox with the equirectangular image at `bytes`, without touching the
+    /// model, camera, or lights.
+    pub fn set_skybox(&mut self, bytes: &[u8]) -> anyhow::Result<()> {
+        self.scene.set_skybox(
+            &self.ctx.handle(),
+            &self.hdr_loader,
+            &self.layouts,
+            bytes,
+            Some("uploaded_skybox"),
+        )
+    }
+
+    /// Moves the sun to match the given hour of day (0-24, wrapping).
+    pub fn set_time_of_day(&mut self, hour: f32) {
+        self.scene.set_time_of_day(&self.ctx.queue, hour);
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -226,8 +257,19 @@ impl Engine {
 pub struct App {
     #[cfg(target_arch = "wasm32")]
     proxy: Option<winit::event_loop::EventLoopProxy<Engine>>,
+    #[cfg(target_arch = "wasm32")]
+    canvas_id: String,
+    #[cfg(target_arch = "wasm32")]
+    engine: Rc<RefCell<Option<Engine>>>,
+    /// Resolved with a `web::RendererHandle` once `Engine::new` finishes; `None` for the
+    /// zero-config `run_web` entry point, which has no JS caller awaiting a result.
+    #[cfg(target_arch = "wasm32")]
+    resolve: Option<js_sys::Function>,
+    #[cfg(target_arch = "wasm32")]
+    reject: Option<js_sys::Function>,
     #[cfg(not(target_arch = "wasm32"))]
     scene_path: Option<PathBuf>,
+    #[cfg(not(target_arch = "wasm32"))]
     engine: Option<Engine>,
     pending_actions: Vec<Action>,
 }
@@ -241,12 +283,43 @@ impl App {
         #[cfg(target_arch = "wasm32")]
         let proxy = Some(event_loop.create_proxy());
         Self {
+            #[cfg(not(target_arch = "wasm32"))]
             engine: None,
+            #[cfg(target_arch = "wasm32")]
+            engine: Rc::new(RefCell::new(None)),
             pending_actions: Vec::new(),
             #[cfg(not(target_arch = "wasm32"))]
             scene_path,
             #[cfg(target_arch = "wasm32")]
             proxy,
+            #[cfg(target_arch = "wasm32")]
+            canvas_id: String::from("canvas"),
+            #[cfg(target_arch = "wasm32")]
+            resolve: None,
+            #[cfg(target_arch = "wasm32")]
+            reject: None,
+        }
+    }
+
+    /// Builds an `App` whose `Engine` is shared (via `engine`) with an external
+    /// `web::RendererHandle`, and whose readiness is reported through `resolve`/`reject` instead
+    /// of just being logged. This is what `web::RendererHandle::init` uses; the zero-config
+    /// `run_web` entry point keeps using the plain `App::new` above.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn new_controlled(
+        event_loop: &EventLoop<Engine>,
+        canvas_id: String,
+        engine: Rc<RefCell<Option<Engine>>>,
+        resolve: js_sys::Function,
+        reject: js_sys::Function,
+    ) -> Self {
+        Self {
+            proxy: Some(event_loop.create_proxy()),
+            canvas_id,
+            engine,
+            resolve: Some(resolve),
+            reject: Some(reject),
+            pending_actions: Vec::new(),
         }
     }
 }
@@ -262,11 +335,19 @@ impl ApplicationHandler<Engine> for App {
             use wasm_bindgen::JsCast;
             use winit::platform::web::WindowAttributesExtWebSys;
 
-            const CANVAS_ID: &str = "canvas";
-
             let window = wgpu::web_sys::window().unwrap_throw();
             let document = window.document().unwrap_throw();
-            let canvas = document.get_element_by_id(CANVAS_ID).unwrap_throw();
+
+            let Some(canvas) = document.get_element_by_id(&self.canvas_id) else {
+                let message =
+                    format!("no element with id \"{}\" was found in the document", self.canvas_id);
+                log::error!("{message}");
+                if let Some(reject) = self.reject.take() {
+                    let _ = reject.call1(&JsValue::NULL, &JsValue::from_str(&message));
+                }
+                event_loop.exit();
+                return;
+            };
             let html_canvas_element = canvas.unchecked_into();
             window_attributes = window_attributes.with_canvas(Some(html_canvas_element));
         }
@@ -289,16 +370,20 @@ impl ApplicationHandler<Engine> for App {
         #[cfg(target_arch = "wasm32")]
         {
             if let Some(proxy) = self.proxy.take() {
+                let reject = self.reject.take();
                 wasm_bindgen_futures::spawn_local(async move {
-                    assert!(
-                        proxy
-                            .send_event(
-                                Engine::new(window)
-                                    .await
-                                    .expect("Unable to create canvas!!!")
-                            )
-                            .is_ok()
-                    )
+                    match Engine::new(window).await {
+                        Ok(engine) => {
+                            let _ = proxy.send_event(engine);
+                        }
+                        Err(e) => {
+                            log::error!("{e:#}");
+                            if let Some(reject) = reject {
+                                let _ =
+                                    reject.call1(&JsValue::NULL, &JsValue::from_str(&format!("{e:#}")));
+                            }
+                        }
+                    }
                 });
             }
         }
@@ -313,8 +398,18 @@ impl ApplicationHandler<Engine> for App {
                 event.window.inner_size().width,
                 event.window.inner_size().height,
             );
+
+            *self.engine.borrow_mut() = Some(event);
+
+            if let Some(resolve) = self.resolve.take() {
+                let handle = crate::web::RendererHandle::from_engine(self.engine.clone());
+                let _ = resolve.call1(&JsValue::NULL, &JsValue::from(handle));
+            }
         }
-        self.engine = Some(event);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.engine = Some(event);
+        }
     }
 
     fn window_event(
@@ -323,6 +418,14 @@ impl ApplicationHandler<Engine> for App {
         _window_id: winit::window::WindowId,
         event: WindowEvent,
     ) {
+        #[cfg(target_arch = "wasm32")]
+        let mut engine_guard = self.engine.borrow_mut();
+        #[cfg(target_arch = "wasm32")]
+        let engine = match engine_guard.as_mut() {
+            Some(engine) => engine,
+            None => return,
+        };
+        #[cfg(not(target_arch = "wasm32"))]
         let engine = match &mut self.engine {
             Some(engine) => engine,
             None => return,
@@ -448,11 +551,23 @@ pub fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The zero-config entry point the legacy `index.html` harness relies on: it auto-runs as soon
+/// as the wasm module is instantiated, using the hardcoded "canvas" element id. Pages that don't
+/// have that element (like the Next.js app, which uses `web::RendererHandle::init` with its own
+/// id instead) are left alone rather than logging a spurious "no element with id" error.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(start)]
 pub fn run_web() -> Result<(), wasm_bindgen::JsValue> {
     console_error_panic_hook::set_once();
-    run().unwrap_throw();
+
+    let has_default_canvas = wgpu::web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.get_element_by_id("canvas"))
+        .is_some();
+
+    if has_default_canvas {
+        run().unwrap_throw();
+    }
 
     Ok(())
 }

@@ -121,6 +121,20 @@ fn extension(file_name: &str) -> Option<String> {
     Some(extension.to_ascii_lowercase())
 }
 
+/// Loads a glTF/GLB model directly from bytes, bypassing disk/embedded resolution entirely.
+///
+/// This is the seam a browser upload (or any other caller that already has the bytes in memory,
+/// with no path to resolve) plugs into.
+pub fn load_glb(
+    bytes: &[u8],
+    file_name: &str,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layout: &wgpu::BindGroupLayout,
+) -> anyhow::Result<model::Model> {
+    gltf_loader::load(bytes, file_name, device, queue, layout)
+}
+
 pub async fn load_model(
     file_name: &str,
     device: &wgpu::Device,
