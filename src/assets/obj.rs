@@ -72,6 +72,13 @@ pub async fn load(
         })
     }
 
+    let mut bounds = model::Bounds::empty();
+    for m in &models {
+        for position in m.mesh.positions.chunks_exact(3) {
+            bounds.include(cgmath::Point3::new(position[0], position[1], position[2]));
+        }
+    }
+
     // Load meshes
     let meshes = models
         .into_iter()
@@ -143,5 +150,6 @@ pub async fn load(
         materials,
         instances: Vec::new(),
         lights: Vec::new(),
+        bounds,
     })
 }

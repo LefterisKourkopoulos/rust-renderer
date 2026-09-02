@@ -1,5 +1,7 @@
 use std::ops::Range;
 
+use cgmath::InnerSpace;
+
 use super::instance::Instance;
 use super::light::Light;
 use crate::gfx::{Texture, Vertex};
@@ -56,6 +58,63 @@ pub struct Model {
     pub materials: Vec<Material>,
     pub instances: Vec<Instance>,
     pub lights: Vec<Light>,
+    pub bounds: Bounds,
+}
+
+/// An axis-aligned world-space bounding box, used to frame the camera on a freshly loaded model
+/// regardless of the scale or origin it was authored at.
+#[derive(Copy, Clone, Debug)]
+pub struct Bounds {
+    pub min: cgmath::Point3<f32>,
+    pub max: cgmath::Point3<f32>,
+}
+
+impl Bounds {
+    pub fn empty() -> Self {
+        Self {
+            min: cgmath::Point3::new(f32::INFINITY, f32::INFINITY, f32::INFINITY),
+            max: cgmath::Point3::new(f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY),
+        }
+    }
+
+    pub fn include(&mut self, point: cgmath::Point3<f32>) {
+        self.min.x = self.min.x.min(point.x);
+        self.min.y = self.min.y.min(point.y);
+        self.min.z = self.min.z.min(point.z);
+        self.max.x = self.max.x.max(point.x);
+        self.max.y = self.max.y.max(point.y);
+        self.max.z = self.max.z.max(point.z);
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.min.x > self.max.x
+    }
+
+    pub fn corners(&self) -> [cgmath::Point3<f32>; 8] {
+        [
+            cgmath::Point3::new(self.min.x, self.min.y, self.min.z),
+            cgmath::Point3::new(self.max.x, self.min.y, self.min.z),
+            cgmath::Point3::new(self.min.x, self.max.y, self.min.z),
+            cgmath::Point3::new(self.max.x, self.max.y, self.min.z),
+            cgmath::Point3::new(self.min.x, self.min.y, self.max.z),
+            cgmath::Point3::new(self.max.x, self.min.y, self.max.z),
+            cgmath::Point3::new(self.min.x, self.max.y, self.max.z),
+            cgmath::Point3::new(self.max.x, self.max.y, self.max.z),
+        ]
+    }
+
+    pub fn center(&self) -> cgmath::Point3<f32> {
+        cgmath::Point3::new(
+            (self.min.x + self.max.x) * 0.5,
+            (self.min.y + self.max.y) * 0.5,
+            (self.min.z + self.max.z) * 0.5,
+        )
+    }
+
+    /// Half the length of the box's diagonal: the radius of a sphere that contains it.
+    pub fn radius(&self) -> f32 {
+        (self.max - self.min).magnitude() * 0.5
+    }
 }
 
 #[repr(C)]

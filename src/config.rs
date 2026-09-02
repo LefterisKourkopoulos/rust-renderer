@@ -77,7 +77,13 @@ pub struct SunConfig {
     pub direction: [f32; 3],
     pub color: [f32; 3],
     pub intensity: f32,
+    pub latitude: f32,
+    pub longitude: f32,
 }
+
+/// London's coordinates, the default location for scenes that don't specify one.
+const LONDON_LATITUDE: f32 = 51.5074;
+const LONDON_LONGITUDE: f32 = -0.1278;
 
 impl Default for SunConfig {
     fn default() -> Self {
@@ -85,6 +91,8 @@ impl Default for SunConfig {
             direction: [-0.4, -1.0, -0.3],
             color: [1.0, 0.98, 0.92],
             intensity: 1.5,
+            latitude: LONDON_LATITUDE,
+            longitude: LONDON_LONGITUDE,
         }
     }
 }

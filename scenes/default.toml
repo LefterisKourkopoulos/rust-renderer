@@ -12,7 +12,7 @@ speed = 2.0
 sensitivity = 1.0
 
 [sun]
-direction = [-0.4, -1.0, -0.3]
+direction = [-0.4, -1.0, 1.0]
 color = [1.0, 0.98, 0.92]
 intensity = 1.5
 

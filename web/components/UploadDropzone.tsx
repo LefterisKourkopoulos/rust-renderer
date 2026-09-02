@@ -16,13 +16,21 @@ export function UploadDropzone() {
       setWarning(`${file.name} is not a .glb file`);
       return;
     }
+    if (status !== "ready") {
+      setWarning("the renderer is still starting; try again in a moment");
+      return;
+    }
     if (file.size > MAX_BYTES) {
       setWarning(`${file.name} is ${(file.size / 1024 / 1024).toFixed(1)} MB; uploads over 100 MB may stall the browser tab`);
     } else {
       setWarning(null);
     }
     const bytes = new Uint8Array(await file.arrayBuffer());
-    loadGlb(bytes, file.name);
+    try {
+      loadGlb(bytes, file.name);
+    } catch (e) {
+      setWarning(`${file.name} failed to load: ${e}`);
+    }
   }
 
   return (

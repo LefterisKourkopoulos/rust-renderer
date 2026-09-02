@@ -34,6 +34,8 @@ struct Sun {
     direction: Option<[f32; 3]>,
     color: Option<[f32; 3]>,
     intensity: Option<f32>,
+    latitude: Option<f32>,
+    longitude: Option<f32>,
 }
 
 #[derive(Deserialize)]
@@ -111,6 +113,8 @@ impl Sun {
             direction: self.direction.unwrap_or(defaults.direction),
             color: self.color.unwrap_or(defaults.color),
             intensity: self.intensity.unwrap_or(defaults.intensity),
+            latitude: self.latitude.unwrap_or(defaults.latitude),
+            longitude: self.longitude.unwrap_or(defaults.longitude),
         }
     }
 }
@@ -184,6 +188,18 @@ fn validate(config: &SceneConfig) -> anyhow::Result<()> {
     if !sun.color.iter().all(|v| v.is_finite() && *v >= 0.0) {
         return Err(anyhow!("sun.color channels must be zero or more"));
     }
+    if !(sun.latitude.is_finite() && (-90.0..=90.0).contains(&sun.latitude)) {
+        return Err(anyhow!(
+            "sun.latitude must be between -90 and 90 degrees, got {}",
+            sun.latitude
+        ));
+    }
+    if !(sun.longitude.is_finite() && (-180.0..=180.0).contains(&sun.longitude)) {
+        return Err(anyhow!(
+            "sun.longitude must be between -180 and 180 degrees, got {}",
+            sun.longitude
+        ));
+    }
 
     if !config.light_intensity_scale.is_finite() || config.light_intensity_scale < 0.0 {
         return Err(anyhow!(
@@ -220,6 +236,14 @@ mod tests {
     }
 
     #[test]
+    fn the_default_sun_location_is_london() {
+        let config = parse("", None).expect("an empty file is legal");
+
+        assert_eq!(config.sun.latitude, 51.5074);
+        assert_eq!(config.sun.longitude, -0.1278);
+    }
+
+    #[test]
     fn every_field_round_trips_from_toml() {
         let config = parse(
             r#"
@@ -240,6 +264,8 @@ mod tests {
             direction = [0.0, -1.0, 0.0]
             color = [1.0, 0.5, 0.25]
             intensity = 3.0
+            latitude = 40.7128
+            longitude = -74.0060
 
             [grid]
             instances_per_row = 4
@@ -262,6 +288,8 @@ mod tests {
         assert_eq!(config.sun.direction, [0.0, -1.0, 0.0]);
         assert_eq!(config.sun.color, [1.0, 0.5, 0.25]);
         assert_eq!(config.sun.intensity, 3.0);
+        assert_eq!(config.sun.latitude, 40.7128);
+        assert_eq!(config.sun.longitude, -74.0060);
         assert_eq!(config.grid.instances_per_row, 4);
         assert_eq!(config.grid.space_between, 1.5);
     }
@@ -336,6 +364,22 @@ mod tests {
     }
 
     #[test]
+    fn a_latitude_outside_plus_or_minus_ninety_is_rejected() {
+        let error = parse("[sun]\nlatitude = 91.0", None).expect_err("no such latitude exists");
+        assert!(error.to_string().contains("sun.latitude"));
+
+        assert!(parse("[sun]\nlatitude = -91.0", None).is_err());
+    }
+
+    #[test]
+    fn a_longitude_outside_plus_or_minus_one_eighty_is_rejected() {
+        let error = parse("[sun]\nlongitude = 181.0", None).expect_err("no such longitude exists");
+        assert!(error.to_string().contains("sun.longitude"));
+
+        assert!(parse("[sun]\nlongitude = -181.0", None).is_err());
+    }
+
+    #[test]
     fn a_blank_model_name_is_rejected() {
         assert!(parse("model = \"   \"", None).is_err());
     }
@@ -349,6 +393,8 @@ mod tests {
         assert!(parse("[camera]\nzfar = nan", None).is_err());
         assert!(parse("[camera]\nfovy = nan", None).is_err());
         assert!(parse("[sun]\nintensity = nan", None).is_err());
+        assert!(parse("[sun]\nlatitude = nan", None).is_err());
+        assert!(parse("[sun]\nlongitude = nan", None).is_err());
         assert!(parse("[grid]\nspace_between = nan", None).is_err());
     }
 

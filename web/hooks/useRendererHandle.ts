@@ -23,9 +23,6 @@ export function useRenderer(): RendererContextValue {
   return value;
 }
 
-// Module-level cache so React Strict Mode's dev-time double effect invocation (and any other
-// re-mount) reuses the same in-flight/completed init instead of spinning up a second wasm
-// module, event loop, and GPU device.
 let initPromise: Promise<RendererHandle> | null = null;
 
 function initRenderer(canvasId: string): Promise<RendererHandle> {

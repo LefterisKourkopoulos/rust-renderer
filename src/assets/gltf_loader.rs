@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::{Context, anyhow};
-use cgmath::SquareMatrix;
+use cgmath::{SquareMatrix, Transform};
 use wgpu::util::DeviceExt;
 
 use super::tangents;
@@ -9,6 +9,7 @@ use crate::gfx::Texture;
 use crate::scene::instance::Instance;
 use crate::scene::light::{Light, LightKind};
 use crate::scene::model;
+use crate::scene::model::Bounds;
 
 const FLAT_NORMAL: [u8; 4] = [128, 128, 255, 255];
 
@@ -24,7 +25,7 @@ pub fn load(
 
     let placements = placements(&document);
     let materials = load_materials(&document, &images, device, queue, layout, file_name)?;
-    let (meshes, instances) = load_meshes(&document, &buffers, &placements, device, file_name)?;
+    let (meshes, instances, bounds) = load_meshes(&document, &buffers, &placements, device, file_name)?;
     let lights = load_lights(&document, &placements);
 
     if meshes.is_empty() {
@@ -38,6 +39,7 @@ pub fn load(
         materials,
         instances,
         lights,
+        bounds,
     })
 }
 
@@ -83,9 +85,10 @@ fn load_meshes(
     placements: &HashMap<usize, cgmath::Matrix4<f32>>,
     device: &wgpu::Device,
     file_name: &str,
-) -> anyhow::Result<(Vec<model::Mesh>, Vec<Instance>)> {
+) -> anyhow::Result<(Vec<model::Mesh>, Vec<Instance>, Bounds)> {
     let mut meshes = Vec::new();
     let mut instances = Vec::new();
+    let mut bounds = Bounds::empty();
 
     for mesh in document.meshes() {
         let transforms = instances_of(document, placements, mesh.index());
@@ -112,6 +115,18 @@ fn load_meshes(
                 .read_positions()
                 .ok_or_else(|| anyhow!("{file_name}: primitive {name} has no POSITION attribute"))?
                 .collect();
+
+            let mut local_bounds = Bounds::empty();
+            for position in &positions {
+                local_bounds.include(cgmath::Point3::new(position[0], position[1], position[2]));
+            }
+            if !local_bounds.is_empty() {
+                for transform in &transforms {
+                    for corner in local_bounds.corners() {
+                        bounds.include(transform.transform_point(corner));
+                    }
+                }
+            }
 
             let mut normals = reader
                 .read_normals()
@@ -168,7 +183,7 @@ fn load_meshes(
         }
     }
 
-    Ok((meshes, instances))
+    Ok((meshes, instances, bounds))
 }
 
 fn build_vertices(

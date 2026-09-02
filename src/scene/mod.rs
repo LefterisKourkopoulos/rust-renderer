@@ -26,6 +26,7 @@ pub struct Scene {
     #[allow(dead_code)]
     sky_texture: CubeTexture,
     environment_bind_group: wgpu::BindGroup,
+    sun_latitude: f32,
 }
 
 struct DiffuseOverride {
@@ -38,9 +39,6 @@ struct DiffuseOverride {
     bind_group: wgpu::BindGroup,
 }
 
-/// The instances to draw for a freshly loaded model: the model's own baked transforms if it has
-/// any, else the demo grid (only meaningful for `Scene::new`'s own config-driven load), else a
-/// single instance at the origin.
 fn instances_for(model: &Model, grid: Option<&InstanceGridConfig>) -> Vec<Instance> {
     if !model.instances.is_empty() {
         model.instances.clone()
@@ -114,8 +112,6 @@ impl Scene {
 
         let (mut lights, animate) = if obj_model.lights.is_empty() {
             let fallback = vec![
-                // Intensity 20 compensates for the inverse square falloff the shader now applies:
-                // at the grid's 3-4 unit light distance that costs roughly a factor of 12, so this
                 // keeps the demo grid about as bright as it was before attenuation existed.
                 //Light::new([2.0, 2.0, 2.0], [1.0, 0.0, 0.0]).with_intensity(20.0),
                 //Light::new([-2.0, 2.0, 2.0], [0.0, 1.0, 0.0]).with_intensity(20.0),
@@ -182,14 +178,10 @@ impl Scene {
             diffuse_override: None,
             sky_texture,
             environment_bind_group,
+            sun_latitude: config.sun.latitude,
         })
     }
 
-    /// Replaces the drawn model in place, loading `bytes` as a glTF/GLB file. Camera, lights
-    /// (including the sun), and skybox are left exactly as they were, so an uploaded model does
-    /// not clobber whatever time-of-day/skybox controls have already set. Any lights the file
-    /// itself declares are deliberately ignored here (unlike `Scene::new`'s fresh load), so the
-    /// independently controlled sun stays authoritative.
     pub fn set_model(
         &mut self,
         ctx: &GpuHandle,
@@ -201,6 +193,7 @@ impl Scene {
         let instances = instances_for(&obj_model, None);
         let instance_buffer = build_instance_buffer(&ctx.device, &instances);
 
+        self.camera.frame(&obj_model.bounds);
         self.obj_model = obj_model;
         self.instances = instances;
         self.instance_buffer = instance_buffer;
@@ -208,8 +201,6 @@ impl Scene {
         Ok(())
     }
 
-    /// Replaces the skybox in place from an equirectangular image's bytes, without touching the
-    /// model, camera, or lights.
     pub fn set_skybox(
         &mut self,
         ctx: &GpuHandle,
@@ -241,10 +232,8 @@ impl Scene {
         Ok(())
     }
 
-    /// Moves the sun to match the given hour of day (0-24, wrapping), updating its direction,
-    /// color, and intensity in place. A no-op if the scene has no directional light.
     pub fn set_time_of_day(&mut self, queue: &wgpu::Queue, hour: f32) {
-        let sun::SunState { direction, color, intensity } = sun::sun_for_hour(hour);
+        let sun::SunState { direction, color, intensity } = sun::sun_for_hour(hour, self.sun_latitude);
         self.lights.set_directional(queue, direction, color, intensity);
     }
 

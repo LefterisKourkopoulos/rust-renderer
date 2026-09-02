@@ -262,6 +262,32 @@ impl CameraState {
         self.projection.resize(width, height);
     }
 
+    /// Repositions the camera along its current look direction so that `bounds` fits entirely
+    /// within the frustum, and widens znear/zfar to cover it. Used when a freshly uploaded model
+    /// may be at any scale or origin, unlike the bundled scenes the default camera presets were
+    /// tuned for.
+    pub fn frame(&mut self, bounds: &crate::scene::model::Bounds) {
+        if bounds.is_empty() {
+            return;
+        }
+
+        let radius = bounds.radius().max(1e-3);
+
+        let vfov = self.projection.fovy.0;
+        let hfov = 2.0 * ((vfov * 0.5).tan() * self.projection.aspect).atan();
+        let limiting_half_fov = vfov.min(hfov) * 0.5;
+        let distance = (radius / limiting_half_fov.sin()) * 1.25;
+
+        let (sin_pitch, cos_pitch) = self.camera.pitch.0.sin_cos();
+        let (sin_yaw, cos_yaw) = self.camera.yaw.0.sin_cos();
+        let forward =
+            cgmath::Vector3::new(cos_pitch * cos_yaw, sin_pitch, cos_pitch * sin_yaw).normalize();
+
+        self.camera.position = bounds.center() - forward * distance;
+        self.projection.znear = (distance - radius * 2.0).max(radius * 0.01).max(1e-4);
+        self.projection.zfar = distance + radius * 4.0;
+    }
+
     pub fn set_move(&mut self, direction: CameraMove, is_pressed: bool) {
         self.controller.set_move(direction, is_pressed);
     }
